@@ -1,0 +1,4123 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DeckStudio — Local PowerPoint Lecture Viewer</title>
+
+  <!-- Fonts: Inter for crisp UI & Cairo for high-legibility Arabic/Bidi typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Carlito:ital,wght@0,400;0,700;1,400;1,700&family=Caladea:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet" />
+
+  <!-- Core Dependencies: JSZip 3.10.1, DOMPurify 3.1.6, html-to-image 1.11.11 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.11/html-to-image.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+  <style>
+    /* ==========================================================================
+       1. DESIGN TOKENS & THEME SYSTEM (Linear / Notion / PowerPoint Studio)
+       ========================================================================== */
+    :root {
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-arabic: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+
+      --radius-xs: 4px;
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --radius-xl: 16px;
+
+      --header-h: 48px;
+      --tabs-h: 36px;
+      --footer-h: 38px;
+      --sidebar-w: 248px;
+      --transition-fast: 140ms cubic-bezier(0.16, 1, 0.3, 1);
+      --transition-med: 220ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    [data-theme="dark"] {
+      --bg-app: #0d0f12;
+      --bg-surface: #14171c;
+      --bg-elevated: #1c2028;
+      --bg-hover: #252a34;
+      --bg-active: #2c3340;
+      --bg-canvas: #090a0c;
+      --bg-canvas-dot: rgba(255, 255, 255, 0.055);
+
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.15);
+
+      --text-primary: #f1f3f6;
+      --text-secondary: #9ba3b0;
+      --text-muted: #68707e;
+
+      --accent: #5e6ad2;
+      --accent-hover: #6e7ae2;
+      --accent-soft: rgba(94, 106, 210, 0.16);
+      --accent-border: rgba(94, 106, 210, 0.45);
+
+      --danger: #e5484d;
+      --danger-soft: rgba(229, 72, 77, 0.14);
+      --warning: #f5a623;
+      --success: #30a46c;
+
+      --slide-shadow: 0 24px 64px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
+      --thumb-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+
+    [data-theme="light"] {
+      --bg-app: #f6f7f9;
+      --bg-surface: #ffffff;
+      --bg-elevated: #f0f2f5;
+      --bg-hover: #e7eaef;
+      --bg-active: #dfe3ea;
+      --bg-canvas: #e9ecf1;
+      --bg-canvas-dot: rgba(0, 0, 0, 0.06);
+
+      --border-subtle: rgba(15, 23, 42, 0.09);
+      --border-strong: rgba(15, 23, 42, 0.18);
+
+      --text-primary: #111827;
+      --text-secondary: #4b5563;
+      --text-muted: #8b94a3;
+
+      --accent: #4f5bd5;
+      --accent-hover: #424ec4;
+      --accent-soft: rgba(79, 91, 213, 0.11);
+      --accent-border: rgba(79, 91, 213, 0.4);
+
+      --danger: #dc2626;
+      --danger-soft: rgba(220, 38, 38, 0.1);
+      --warning: #d97706;
+      --success: #16a34a;
+
+      --slide-shadow: 0 20px 50px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.08);
+      --thumb-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+    }
+
+    /* ==========================================================================
+       2. BASE & RESET
+       ========================================================================== */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      font-family: var(--font-sans);
+      background: var(--bg-app);
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+    }
+
+    button, input {
+      font-family: inherit;
+      color: inherit;
+      background: none;
+      border: none;
+      outline: none;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-strong);
+      border-radius: 999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--text-muted);
+    }
+
+    /* ==========================================================================
+       3. APP SHELL LAYOUT
+       ========================================================================== */
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+    }
+
+    /* Study Mode hides toolbar, tabs, sidebar, footer */
+    #app.study-mode .top-toolbar,
+    #app.study-mode .tabs-bar,
+    #app.study-mode .sidebar,
+    #app.study-mode .bottom-bar {
+      display: none !important;
+    }
+
+    #study-exit-pill {
+      position: fixed;
+      top: 14px;
+      right: 16px;
+      z-index: 900;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-primary);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+      opacity: 0.35;
+      transition: opacity var(--transition-fast), transform var(--transition-fast);
+    }
+    #app.study-mode #study-exit-pill {
+      display: inline-flex;
+    }
+    #study-exit-pill:hover {
+      opacity: 1;
+      transform: translateY(1px);
+    }
+
+    /* Top Toolbar */
+    .top-toolbar {
+      height: var(--header-h);
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      gap: 8px;
+      flex-shrink: 0;
+      z-index: 30;
+    }
+
+    .toolbar-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+      font-weight: 600;
+      font-size: 13.5px;
+      letter-spacing: -0.01em;
+      color: var(--text-primary);
+    }
+
+    .brand-badge {
+      width: 24px;
+      height: 24px;
+      border-radius: var(--radius-sm);
+      background: linear-gradient(135deg, #d24726 0%, #f37021 100%);
+      color: #fff;
+      font-weight: 700;
+      font-size: 12px;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 2px 6px rgba(210, 71, 38, 0.35);
+    }
+
+    .divider-v {
+      width: 1px;
+      height: 18px;
+      background: var(--border-subtle);
+      margin: 0 4px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      height: 30px;
+      padding: 0 9px;
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      transition: background var(--transition-fast), color var(--transition-fast);
+      white-space: nowrap;
+    }
+    .btn:hover:not(:disabled) {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+    .btn.active {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--accent-hover);
+      color: #fff;
+    }
+    .btn-icon {
+      width: 30px;
+      padding: 0;
+    }
+    .btn svg {
+      width: 15px;
+      height: 15px;
+      flex-shrink: 0;
+    }
+
+    .zoom-readout {
+      min-width: 48px;
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      color: var(--text-primary);
+      padding: 0 4px;
+    }
+
+    /* Tabs Bar (Multi-file Switcher) */
+    .tabs-bar {
+      height: var(--tabs-h);
+      background: var(--bg-app);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      gap: 4px;
+      overflow-x: auto;
+      flex-shrink: 0;
+    }
+    .tabs-bar:empty {
+      display: none;
+    }
+
+    .deck-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 27px;
+      padding: 0 10px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: transparent;
+      border: 1px solid transparent;
+      max-width: 240px;
+      transition: all var(--transition-fast);
+    }
+    .deck-tab:hover {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+    .deck-tab.active {
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      border-color: var(--border-subtle);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.12);
+    }
+    .deck-tab-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 500;
+    }
+    .deck-tab-count {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      color: var(--text-muted);
+      background: var(--bg-elevated);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .deck-tab-close {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      display: grid;
+      place-items: center;
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 1;
+    }
+    .deck-tab-close:hover {
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    /* Main Workspace */
+    .workspace {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      position: relative;
+    }
+
+    /* Left Sidebar */
+    .sidebar {
+      width: var(--sidebar-w);
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      transition: margin-left var(--transition-med);
+      z-index: 20;
+    }
+    .sidebar.collapsed {
+      margin-left: calc(-1 * var(--sidebar-w));
+    }
+
+    .sidebar-header {
+      padding: 8px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      gap: 4px;
+    }
+
+    .segmented-btn {
+      flex: 1;
+      height: 26px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      transition: all var(--transition-fast);
+    }
+    .segmented-btn.active {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    .sidebar-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* Thumbnails */
+    .thumb-card {
+      display: flex;
+      gap: 8px;
+      padding: 6px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background var(--transition-fast), border-color var(--transition-fast);
+    }
+    .thumb-card:hover {
+      background: var(--bg-elevated);
+    }
+    .thumb-card.active {
+      background: var(--accent-soft);
+      border-color: var(--accent-border);
+    }
+
+    .thumb-num {
+      width: 22px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      text-align: right;
+      padding-top: 2px;
+      flex-shrink: 0;
+    }
+    .thumb-card.active .thumb-num {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .thumb-frame {
+      flex: 1;
+      background: #ffffff;
+      border-radius: var(--radius-xs);
+      overflow: hidden;
+      position: relative;
+      box-shadow: var(--thumb-shadow);
+      aspect-ratio: 16 / 9;
+    }
+    .thumb-scaler {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: top left;
+      pointer-events: none;
+    }
+    .thumb-placeholder {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+      color: #94a3b8;
+      background: #f8fafc;
+    }
+
+    /* Outline View */
+    .outline-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      line-height: 1.4;
+    }
+    .outline-item:hover {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+    .outline-item.active {
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 500;
+    }
+    .outline-num {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      min-width: 22px;
+    }
+    .outline-title {
+      flex: 1;
+      word-break: break-word;
+    }
+
+    /* Center Stage & Notes Container */
+    .stage-column {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      background-color: var(--bg-canvas);
+      background-image: radial-gradient(var(--bg-canvas-dot) 1px, transparent 1px);
+      background-size: 18px 18px;
+      position: relative;
+    }
+
+    .viewport {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+      display: grid;
+      place-items: center;
+      cursor: default;
+    }
+    .viewport.can-pan {
+      cursor: grab;
+    }
+    .viewport.panning {
+      cursor: grabbing;
+    }
+
+    .slide-stage-wrapper {
+      position: relative;
+      transform-origin: center center;
+      transition: transform 90ms ease-out;
+      will-change: transform;
+    }
+    .viewport.panning .slide-stage-wrapper {
+      transition: none;
+    }
+
+    .slide-surface {
+      position: relative;
+      background: #ffffff;
+      color: #111827;
+      box-shadow: var(--slide-shadow);
+      overflow: hidden;
+      user-select: text;
+    }
+
+    /* Speaker Notes Drawer */
+    .notes-drawer {
+      height: 155px;
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      z-index: 15;
+    }
+    .notes-drawer.hidden {
+      display: none;
+    }
+    .notes-header {
+      height: 30px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .notes-body {
+      flex: 1;
+      padding: 12px 18px;
+      overflow-y: auto;
+      font-size: 13.5px;
+      line-height: 1.6;
+      color: var(--text-primary);
+      user-select: text;
+      white-space: pre-wrap;
+    }
+    .notes-body[dir="rtl"] {
+      font-family: var(--font-arabic);
+      font-size: 14.5px;
+    }
+
+    /* Bottom Status Bar */
+    .bottom-bar {
+      height: var(--footer-h);
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+      z-index: 25;
+    }
+
+    .slide-jump-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 2px 8px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+    .slide-jump-input {
+      width: 36px;
+      text-align: center;
+      font-weight: 600;
+      color: var(--text-primary);
+      background: transparent;
+    }
+    .slide-jump-input:focus {
+      background: var(--bg-surface);
+      border-radius: 3px;
+    }
+
+    .meta-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--bg-elevated);
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+    }
+
+    /* ==========================================================================
+       4. EMPTY / WELCOME LANDING STATE
+       ========================================================================== */
+    .empty-state {
+      max-width: 580px;
+      width: calc(100% - 32px);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xl);
+      padding: 36px 32px;
+      text-align: center;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+    }
+    .empty-icon {
+      width: 54px;
+      height: 54px;
+      margin: 0 auto 16px;
+      border-radius: 14px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      display: grid;
+      place-items: center;
+    }
+    .empty-title {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+    .empty-desc {
+      font-size: 13.5px;
+      color: var(--text-secondary);
+      line-height: 1.55;
+      margin-bottom: 24px;
+    }
+    .empty-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 22px;
+    }
+    .btn-lg {
+      height: 38px;
+      padding: 0 16px;
+      font-size: 13px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-subtle);
+    }
+    .btn-lg.btn-primary {
+      border-color: transparent;
+    }
+
+    .recent-list {
+      text-align: left;
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 16px;
+      margin-top: 8px;
+    }
+    .recent-list-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    .recent-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+    .recent-item:hover {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+
+    /* ==========================================================================
+       5. OVERLAYS: DRAG-DROP, SEARCH MODAL, SHORTCUTS MODAL, PROGRESS & TOASTS
+       ========================================================================== */
+    .drop-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 999;
+      background: rgba(13, 15, 18, 0.82);
+      backdrop-filter: blur(6px);
+      display: none;
+      place-items: center;
+      padding: 24px;
+    }
+    .drop-overlay.visible {
+      display: grid;
+    }
+    .drop-box {
+      width: 100%;
+      max-width: 480px;
+      padding: 48px 32px;
+      border: 2px dashed var(--accent);
+      border-radius: var(--radius-xl);
+      background: var(--bg-surface);
+      text-align: center;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 500;
+      background: rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(3px);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 72px;
+    }
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal-card {
+      width: 100%;
+      max-width: 540px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+      margin: 0 16px;
+    }
+
+    .search-input-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .search-input {
+      flex: 1;
+      font-size: 14px;
+      color: var(--text-primary);
+    }
+    .search-results {
+      max-height: 360px;
+      overflow-y: auto;
+      padding: 8px;
+    }
+    .search-hit {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 10px 12px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      text-align: left;
+    }
+    .search-hit:hover {
+      background: var(--bg-elevated);
+    }
+    .search-hit-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .search-hit-snippet {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+    .search-hit-snippet mark {
+      background: var(--accent-soft);
+      color: var(--text-primary);
+      padding: 0 3px;
+      border-radius: 3px;
+      font-weight: 600;
+    }
+
+    .shortcuts-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px 20px;
+      padding: 18px 20px;
+    }
+    .shortcut-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+    }
+    kbd {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
+    }
+
+    /* Progress & Error Banner */
+    .loading-bar-wrap {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      display: none;
+      flex-direction: column;
+    }
+    .loading-bar-wrap.active {
+      display: flex;
+    }
+    .loading-track {
+      height: 3px;
+      background: var(--bg-elevated);
+      width: 100%;
+    }
+    .loading-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      transition: width 150ms ease;
+    }
+    .loading-pill {
+      align-self: center;
+      margin-top: 10px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      font-size: 12px;
+      color: var(--text-primary);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+    }
+
+    .toast-stack {
+      position: fixed;
+      bottom: 50px;
+      right: 16px;
+      z-index: 950;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-width: 380px;
+    }
+    .toast {
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      border-left: 3px solid var(--accent);
+      font-size: 12.5px;
+      color: var(--text-primary);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .toast.error {
+      border-left-color: var(--danger);
+    }
+    .toast.success {
+      border-left-color: var(--success);
+    }
+
+    /* ==========================================================================
+       6. SLIDE RENDERING ENGINE ELEMENTS
+       ========================================================================== */
+    .pptx-el {
+      position: absolute;
+      box-sizing: border-box;
+      transform-origin: center center;
+    }
+
+    .pptx-textbox {
+      display: flex;
+      flex-direction: column;
+      overflow: visible;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+    }
+
+    .pptx-p {
+      margin: 0;
+      padding: 0;
+      unicode-bidi: plaintext;
+    }
+
+    .pptx-p[dir="rtl"] {
+      font-family: var(--font-arabic);
+    }
+
+    .pptx-run {
+      white-space: pre-wrap;
+    }
+
+    /* wrap="none": line breaks BETWEEN runs are governed by the paragraph's
+       white-space, so the paragraph itself must not wrap either */
+    .pptx-textbox.nowrap .pptx-p,
+    .pptx-textbox.nowrap .pptx-run {
+      white-space: pre;
+    }
+
+    .pptx-bullet {
+      display: inline-block;
+      text-indent: 0;
+      white-space: pre;
+    }
+
+    .pptx-run a {
+      color: inherit;
+      text-decoration: underline;
+    }
+
+    .pptx-table {
+      width: 100%;
+      height: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    .pptx-table td {
+      box-sizing: border-box;
+      overflow: hidden;
+      word-wrap: break-word;
+      vertical-align: middle;
+    }
+
+    .pptx-fallback-box {
+      width: 100%;
+      height: 100%;
+      border: 1.5px dashed rgba(100, 116, 139, 0.55);
+      background: rgba(148, 163, 184, 0.1);
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+      text-align: center;
+      font-size: 12px;
+      color: #475569;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 820px) {
+      :root {
+        --sidebar-w: 190px;
+      }
+      .hide-mobile {
+        display: none !important;
+      }
+      .shortcuts-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- Loading Progress Indicator -->
+    <div id="loading-bar" class="loading-bar-wrap" role="status" aria-live="polite">
+      <div class="loading-track"><div id="loading-fill" class="loading-fill"></div></div>
+      <div id="loading-text" class="loading-pill">Parsing presentation…</div>
+    </div>
+
+    <!-- Floating Exit Study Mode Pill -->
+    <button id="study-exit-pill" title="Exit Study Mode (Esc)">
+      <span>Study Mode</span>
+      <kbd>Esc</kbd>
+    </button>
+
+    <!-- Top Studio Toolbar -->
+    <header class="top-toolbar">
+      <div class="toolbar-group">
+        <button id="btn-toggle-sidebar" class="btn btn-icon" title="Toggle Sidebar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+        </button>
+        <div class="brand">
+          <span class="brand-badge">P</span>
+          <span class="hide-mobile">DeckStudio</span>
+        </div>
+        <div class="divider-v"></div>
+        <button id="btn-open-file" class="btn" title="Open .pptx file (Ctrl+O)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span>Open</span>
+        </button>
+        <button id="btn-load-sample" class="btn hide-mobile" title="Load built-in multilingual sample lecture">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <span>Sample Lecture</span>
+        </button>
+      </div>
+
+      <!-- Zoom & Fit Controls -->
+      <div class="toolbar-group">
+        <button id="btn-zoom-out" class="btn btn-icon" title="Zoom Out (-)" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+        </button>
+        <span id="zoom-readout" class="zoom-readout">100%</span>
+        <button id="btn-zoom-in" class="btn btn-icon" title="Zoom In (+)" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+        </button>
+        <button id="btn-fit-screen" class="btn hide-mobile" title="Fit Slide to Screen (0)" disabled>Fit</button>
+        <button id="btn-fit-width" class="btn hide-mobile" title="Fit Slide to Width" disabled>Width</button>
+      </div>
+
+      <!-- Study, Search, Export & Theme Controls -->
+      <div class="toolbar-group">
+        <button id="btn-search" class="btn" title="Search Slides (Ctrl+F)" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span class="hide-mobile">Search</span>
+        </button>
+        <button id="btn-toggle-notes" class="btn" title="Toggle Speaker Notes" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span class="hide-mobile">Notes</span>
+        </button>
+        <button id="btn-study-mode" class="btn" title="Distraction-Free Study Mode" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          <span class="hide-mobile">Study</span>
+        </button>
+        <div class="divider-v hide-mobile"></div>
+        <button id="btn-export-png" class="btn hide-mobile" title="Export Current Slide as PNG" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          <span>PNG</span>
+        </button>
+        <button id="btn-download-pptx" class="btn hide-mobile" title="Download Original PPTX" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span>PPTX</span>
+        </button>
+        <button id="btn-theme" class="btn btn-icon" title="Toggle Dark / Light Theme">
+          <svg id="icon-theme" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+        <button id="btn-fullscreen" class="btn btn-icon" title="Fullscreen Presentation Mode (F)" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Multi-Presentation Tabs Bar -->
+    <div id="tabs-bar" class="tabs-bar"></div>
+
+    <!-- Main Workspace -->
+    <main class="workspace">
+      <!-- Left Sidebar: Thumbnails & Outline -->
+      <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+          <button id="tab-thumbnails" class="segmented-btn active">Thumbnails</button>
+          <button id="tab-outline" class="segmented-btn">Outline</button>
+        </div>
+        <div id="sidebar-content" class="sidebar-content">
+          <div style="padding: 24px 12px; text-align: center; font-size: 12px; color: var(--text-muted);">
+            Open a presentation to view slides
+          </div>
+        </div>
+      </aside>
+
+      <!-- Stage Column -->
+      <div class="stage-column">
+        <div id="viewport" class="viewport">
+          <!-- Empty Landing Card -->
+          <div id="empty-state" class="empty-state">
+            <div class="empty-icon">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            </div>
+            <h1 class="empty-title">Local PowerPoint Lecture Viewer</h1>
+            <p class="empty-desc">
+              Open university <code>.pptx</code> lecture decks directly in your browser. Zero server uploads, full offline capability, Arabic RTL &amp; bidirectional text support, speaker notes, and high-DPI rendering.
+            </p>
+            <div class="empty-actions">
+              <button id="btn-empty-open" class="btn btn-lg btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span>Open .pptx Files</span>
+              </button>
+              <button id="btn-empty-sample" class="btn btn-lg">
+                <span>Load Sample Lecture (EN + Arabic RTL + Charts)</span>
+              </button>
+            </div>
+            <div style="font-size: 11.5px; color: var(--text-muted);">
+              Tip: Drag &amp; drop one or more <code>.pptx</code> files anywhere on this window
+            </div>
+            <div id="recent-container" class="recent-list" style="display: none;">
+              <div class="recent-list-title">Session Recent Files</div>
+              <div id="recent-list"></div>
+            </div>
+          </div>
+
+          <!-- Active Slide Stage -->
+          <div id="slide-stage-wrapper" class="slide-stage-wrapper" style="display: none;">
+            <div id="slide-surface" class="slide-surface"></div>
+          </div>
+        </div>
+
+        <!-- Collapsible Speaker Notes Drawer -->
+        <section id="notes-drawer" class="notes-drawer hidden">
+          <div class="notes-header">
+            <span>Speaker Notes</span>
+            <button id="btn-close-notes" class="btn btn-icon" style="height:22px;width:22px;" title="Hide Notes">✕</button>
+          </div>
+          <div id="notes-body" class="notes-body">No speaker notes for this slide.</div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Bottom Navigation & Status Bar -->
+    <footer class="bottom-bar">
+      <div class="toolbar-group">
+        <button id="btn-prev" class="btn" title="Previous Slide (Left Arrow / Backspace)" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+          <span>Prev</span>
+        </button>
+
+        <div class="slide-jump-box" title="Type a slide number and press Enter">
+          <input id="slide-jump-input" class="slide-jump-input" type="text" inputmode="numeric" value="0" disabled aria-label="Current slide number" />
+          <span>/</span>
+          <span id="total-slides-label">0</span>
+        </div>
+
+        <button id="btn-next" class="btn" title="Next Slide (Right Arrow / Space)" disabled>
+          <span>Next</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+
+      <div class="toolbar-group">
+        <span id="aspect-badge" class="meta-pill hide-mobile">No Deck Loaded</span>
+        <button id="btn-shortcuts" class="btn" title="Keyboard Shortcuts (?)">
+          <kbd>?</kbd>
+          <span class="hide-mobile">Shortcuts</span>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Hidden File Input -->
+  <input id="file-input" type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple hidden />
+
+  <!-- Drag & Drop Overlay -->
+  <div id="drop-overlay" class="drop-overlay">
+    <div class="drop-box">
+      <div class="empty-icon" style="margin-bottom: 12px;">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </div>
+      <h2 style="font-size: 18px; font-weight: 600; margin-bottom: 6px;">Drop PowerPoint (.pptx) Files</h2>
+      <p style="font-size: 13px; color: var(--text-secondary);">Processed 100% locally in your browser with zero external uploads.</p>
+    </div>
+  </div>
+
+  <!-- Slide Search Modal -->
+  <div id="search-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Search Presentation">
+    <div class="modal-card">
+      <div class="search-input-wrap">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="search-input" class="search-input" type="text" placeholder="Search slide titles, content, tables, or speaker notes…" />
+        <kbd>Esc</kbd>
+      </div>
+      <div id="search-results" class="search-results">
+        <div style="padding: 20px; text-align: center; font-size: 12.5px; color: var(--text-muted);">
+          Type keywords (English or العربية) to search across all slides
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Keyboard Shortcuts Modal -->
+  <div id="shortcuts-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Keyboard Shortcuts">
+    <div class="modal-card">
+      <div class="search-input-wrap" style="justify-content: space-between;">
+        <span style="font-weight: 600; font-size: 14px;">Keyboard Shortcuts</span>
+        <button id="btn-close-shortcuts" class="btn btn-icon" style="height:24px;width:24px;">✕</button>
+      </div>
+      <div class="shortcuts-grid">
+        <div class="shortcut-row"><span>Next slide</span><span><kbd>→</kbd> / <kbd>Space</kbd></span></div>
+        <div class="shortcut-row"><span>Previous slide</span><span><kbd>←</kbd> / <kbd>Backspace</kbd></span></div>
+        <div class="shortcut-row"><span>First slide</span><kbd>Home</kbd></div>
+        <div class="shortcut-row"><span>Last slide</span><kbd>End</kbd></div>
+        <div class="shortcut-row"><span>Toggle fullscreen</span><kbd>F</kbd></div>
+        <div class="shortcut-row"><span>Exit fullscreen / Study</span><kbd>Esc</kbd></div>
+        <div class="shortcut-row"><span>Zoom in / out</span><span><kbd>+</kbd> / <kbd>-</kbd></span></div>
+        <div class="shortcut-row"><span>Fit slide to screen</span><kbd>0</kbd></div>
+        <div class="shortcut-row"><span>Open presentation</span><span><kbd>Ctrl</kbd> + <kbd>O</kbd></span></div>
+        <div class="shortcut-row"><span>Search slides</span><span><kbd>Ctrl</kbd> + <kbd>F</kbd></span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Stack -->
+  <div id="toast-stack" class="toast-stack" aria-live="assertive"></div>
+
+  <script type="module">
+    /**
+     * ==========================================================================
+     * DECKSTUDIO — MODULAR CLIENT-SIDE OPENXML (.PPTX) ENGINE & VIEWER
+     * Architecture:
+     *   1. Utils & Bidi/Arabic Script Helpers
+     *   2. OpenXMLThemeResolver (Colors, Schemes, Fonts, EMU conversions)
+     *   3. OpenXMLParser (JSZip archive reader, Relationships, Slides, Layouts,
+     *      Masters, Notes, Charts, Tables, Shapes, Media Blob URL lifecycle)
+     *   4. SlideRenderer (High-fidelity DOM + SVG + Chart renderer with per-shape
+     *      error boundaries and DOMPurify sanitization)
+     *   5. SampleDeckGenerator (Creates a rich, valid multi-slide .pptx archive
+     *      on the fly with English, Arabic RTL, Bidi, Tables, Charts & Gradients)
+     *   6. ViewerController (State management, Virtualized/Lazy thumbnails,
+     *      Zoom/Pan, Fullscreen, Search, Export PNG, Keyboard Shortcuts)
+     * ==========================================================================
+     */
+
+    /* --------------------------------------------------------------------------
+       1. UTILITIES & ARABIC / BIDIRECTIONAL TEXT DETECTION
+       -------------------------------------------------------------------------- */
+    const EMU_PER_PX = 9525; // Standard 96 DPI: 914400 EMU/inch / 96 px/inch = 9525 EMU/px
+    const ARABIC_REGEX = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+
+    function emuToPx(emu) {
+      const n = Number(emu);
+      return Number.isFinite(n) ? n / EMU_PER_PX : 0;
+    }
+
+    function containsArabic(text) {
+      return typeof text === 'string' && ARABIC_REGEX.test(text);
+    }
+
+    function debounce(fn, delay = 160) {
+      let timer = null;
+      return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), delay);
+      };
+    }
+
+    function resolveZipPath(baseFile, target) {
+      if (!target) return '';
+      if (target.startsWith('/')) return target.replace(/^\/+/, '');
+      const baseParts = baseFile.split('/');
+      baseParts.pop();
+      for (const part of target.split('/')) {
+        if (part === '..') baseParts.pop();
+        else if (part !== '.' && part !== '') baseParts.push(part);
+      }
+      return baseParts.join('/');
+    }
+
+    function parseXml(xmlString) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xmlString, 'application/xml');
+      const err = doc.querySelector('parsererror');
+      if (err) {
+        throw new Error('Malformed XML inside PPTX package');
+      }
+      return doc;
+    }
+
+    /**
+     * Namespace-agnostic OpenXML query helpers
+     */
+    function qAll(node, localName) {
+      if (!node) return [];
+      const res = [];
+      const walk = (el) => {
+        for (let child = el.firstElementChild; child; child = child.nextElementSibling) {
+          if (child.localName === localName) res.push(child);
+          walk(child);
+        }
+      };
+      walk(node);
+      return res;
+    }
+
+    function qOne(node, localName) {
+      if (!node) return null;
+      const walk = (el) => {
+        for (let child = el.firstElementChild; child; child = child.nextElementSibling) {
+          if (child.localName === localName) return child;
+          const found = walk(child);
+          if (found) return found;
+        }
+        return null;
+      };
+      return walk(node);
+    }
+
+    function qDirect(node, localName) {
+      if (!node) return [];
+      const res = [];
+      for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
+        if (child.localName === localName) res.push(child);
+      }
+      return res;
+    }
+
+    function qDirectOne(node, localName) {
+      if (!node) return null;
+      for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
+        if (child.localName === localName) return child;
+      }
+      return null;
+    }
+
+    /* --------------------------------------------------------------------------
+       2. OPENXML THEME & COLOR RESOLVER
+       -------------------------------------------------------------------------- */
+    const PRESET_COLORS = {
+      black: '#000000', white: '#ffffff', red: '#ff0000', green: '#008000',
+      blue: '#0000ff', yellow: '#ffff00', cyan: '#00ffff', magenta: '#ff00ff',
+      gray: '#808080', grey: '#808080', darkGray: '#404040', lightGray: '#c0c0c0',
+      orange: '#ffa500', pink: '#ffc0cb', purple: '#800080', brown: '#a52a2a',
+      navy: '#000080', teal: '#008080', lime: '#00ff00', silver: '#c0c0c0'
+    };
+
+    const DEFAULT_THEME = {
+      colors: {
+        dk1: '#111827', lt1: '#ffffff', dk2: '#1f2937', lt2: '#f3f4f6',
+        accent1: '#4f5bd5', accent2: '#e11d48', accent3: '#059669',
+        accent4: '#d97706', accent5: '#0284c7', accent6: '#7c3aed',
+        hlink: '#2563eb', folHlink: '#7c3aed',
+        tx1: '#111827', bg1: '#ffffff', tx2: '#374151', bg2: '#f8fafc'
+      },
+      majorFont: 'Calibri Light',
+      minorFont: 'Calibri',
+      majorFontEa: null,
+      minorFontEa: null,
+      majorFontCs: null,
+      minorFontCs: null
+    };
+
+    function applyColorModifiers(hex, colorNode) {
+      if (!hex || !colorNode) return hex;
+      let r = parseInt(hex.slice(1, 3), 16);
+      let g = parseInt(hex.slice(3, 5), 16);
+      let b = parseInt(hex.slice(5, 7), 16);
+      let alpha = 1;
+
+      for (let child = colorNode.firstElementChild; child; child = child.nextElementSibling) {
+        const val = Number(child.getAttribute('val') || 0) / 100000;
+        switch (child.localName) {
+          case 'lumMod':
+            r = Math.round(r * val);
+            g = Math.round(g * val);
+            b = Math.round(b * val);
+            break;
+          case 'lumOff':
+            r = Math.round(r + 255 * val);
+            g = Math.round(g + 255 * val);
+            b = Math.round(b + 255 * val);
+            break;
+          case 'tint':
+            r = Math.round(r + (255 - r) * (1 - val));
+            g = Math.round(g + (255 - g) * (1 - val));
+            b = Math.round(b + (255 - b) * (1 - val));
+            break;
+          case 'shade':
+            r = Math.round(r * val);
+            g = Math.round(g * val);
+            b = Math.round(b * val);
+            break;
+          case 'alpha':
+            alpha = Math.max(0, Math.min(1, val));
+            break;
+        }
+      }
+
+      r = Math.max(0, Math.min(255, r));
+      g = Math.max(0, Math.min(255, g));
+      b = Math.max(0, Math.min(255, b));
+
+      if (alpha < 0.999) {
+        return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(3)})`;
+      }
+      return `#${[r, g, b].map(x => x.toString(16).padStart(2, '0')).join('')}`;
+    }
+
+    function resolveColorNode(parentNode, theme = DEFAULT_THEME) {
+      if (!parentNode) return null;
+      const srgb = qOne(parentNode, 'srgbClr');
+      if (srgb) {
+        const val = srgb.getAttribute('val') || '000000';
+        return applyColorModifiers(`#${val.slice(0, 6)}`, srgb);
+      }
+      const scheme = qOne(parentNode, 'schemeClr');
+      if (scheme) {
+        const key = scheme.getAttribute('val');
+        const mapKey = { tx1: 'dk1', bg1: 'lt1', tx2: 'dk2', bg2: 'lt2' }[key] || key;
+        const base = theme.colors[mapKey] || '#111827';
+        return applyColorModifiers(base, scheme);
+      }
+      const prst = qOne(parentNode, 'prstClr');
+      if (prst) {
+        const key = prst.getAttribute('val');
+        const base = PRESET_COLORS[key] || '#000000';
+        return applyColorModifiers(base, prst);
+      }
+      const sys = qOne(parentNode, 'sysClr');
+      if (sys) {
+        const last = sys.getAttribute('lastClr') || '000000';
+        return applyColorModifiers(`#${last.slice(0, 6)}`, sys);
+      }
+      return null;
+    }
+
+    /* --------------------------------------------------------------------------
+       2b. TEXT STYLE INHERITANCE (PowerPoint cascade)
+       presentation defaultTextStyle → master txStyles → master placeholder →
+       layout placeholder → shape lstStyle → paragraph pPr → run rPr
+       -------------------------------------------------------------------------- */
+    // Metric-compatible substitutes so line breaks match PowerPoint when the
+    // original Office font is not installed.
+    const FONT_FALLBACKS = {
+      'calibri': "'Carlito'",
+      'calibri light': "'Calibri', 'Carlito'",
+      'cambria': "'Caladea', Georgia, serif",
+      'arial': "'Liberation Sans', Arimo, Helvetica",
+      'times new roman': "'Liberation Serif', Tinos, Times, serif",
+      'courier new': "'Liberation Mono', Cousine, monospace",
+      'segoe ui': "'Segoe UI Variable', system-ui",
+      'segoe ui light': "'Segoe UI', system-ui"
+    };
+
+    function resolveThemeTypeface(face, theme) {
+      if (!face) return null;
+      if (!face.startsWith('+')) return face;
+      const major = face.startsWith('+mj');
+      const script = face.slice(4);
+      const latin = major ? theme.majorFont : theme.minorFont;
+      if (script === 'cs') return (major ? theme.majorFontCs : theme.minorFontCs) || latin;
+      if (script === 'ea') return (major ? theme.majorFontEa : theme.minorFontEa) || latin;
+      return latin;
+    }
+
+    function buildFontStack(face, arabic = false) {
+      const tail = arabic ? 'var(--font-arabic)' : 'var(--font-sans), var(--font-arabic)';
+      if (!face) return tail;
+      const clean = face.replace(/["'\\;{}]/g, '').trim();
+      if (!clean) return tail;
+      const extra = FONT_FALLBACKS[clean.toLowerCase()];
+      return `'${clean}', ${extra ? `${extra}, ` : ''}${tail}`;
+    }
+
+    function mergeRunProps(target, rPr, theme) {
+      if (!rPr) return target;
+      for (const a of ['sz', 'b', 'i', 'u', 'strike', 'cap', 'baseline', 'spc']) {
+        if (rPr.hasAttribute(a)) target[a] = rPr.getAttribute(a);
+      }
+      const solid = qDirectOne(rPr, 'solidFill');
+      const grad = qDirectOne(rPr, 'gradFill');
+      const color = solid ? resolveColorNode(solid, theme) : (grad ? resolveColorNode(qOne(grad, 'gs'), theme) : null);
+      if (color) target.color = color;
+      for (const f of ['latin', 'ea', 'cs']) {
+        const face = qDirectOne(rPr, f)?.getAttribute('typeface');
+        if (face) target[f] = face;
+      }
+      const hl = qDirectOne(rPr, 'highlight');
+      if (hl) {
+        const c = resolveColorNode(hl, theme);
+        if (c) target.highlight = c;
+      }
+      return target;
+    }
+
+    function readSpacing(node) {
+      if (!node) return null;
+      const pct = qDirectOne(node, 'spcPct');
+      if (pct) return { pct: Number(pct.getAttribute('val') || 0) / 100000 };
+      const pts = qDirectOne(node, 'spcPts');
+      if (pts) return { pts: Number(pts.getAttribute('val') || 0) / 100 };
+      return null;
+    }
+
+    function mergeParaProps(target, pPr, theme) {
+      if (!pPr) return target;
+      for (const a of ['algn', 'marL', 'indent', 'rtl']) {
+        if (pPr.hasAttribute(a)) target[a] = pPr.getAttribute(a);
+      }
+      for (const s of ['lnSpc', 'spcBef', 'spcAft']) {
+        const v = readSpacing(qDirectOne(pPr, s));
+        if (v) target[s] = v;
+      }
+      if (qDirectOne(pPr, 'buNone')) target.bullet = { type: 'none' };
+      const buChar = qDirectOne(pPr, 'buChar');
+      if (buChar) target.bullet = { type: 'char', char: buChar.getAttribute('char') || '•' };
+      if (qDirectOne(pPr, 'buBlip')) target.bullet = { type: 'char', char: '•' };
+      const buAuto = qDirectOne(pPr, 'buAutoNum');
+      if (buAuto) {
+        target.bullet = {
+          type: 'auto',
+          scheme: buAuto.getAttribute('type') || 'arabicPeriod',
+          startAt: Number(buAuto.getAttribute('startAt') || 1)
+        };
+      }
+      const buFont = qDirectOne(pPr, 'buFont')?.getAttribute('typeface');
+      if (buFont) target.buFont = buFont;
+      if (qDirectOne(pPr, 'buFontTx')) delete target.buFont;
+      const buClr = qDirectOne(pPr, 'buClr');
+      if (buClr) target.buClr = resolveColorNode(buClr, theme);
+      if (qDirectOne(pPr, 'buClrTx')) delete target.buClr;
+      const buSz = qDirectOne(pPr, 'buSzPct');
+      if (buSz) target.buSzPct = Number(buSz.getAttribute('val') || 100000) / 100000;
+      if (qDirectOne(pPr, 'buSzTx')) delete target.buSzPct;
+      const defRPr = qDirectOne(pPr, 'defRPr');
+      if (defRPr) target.rPr = mergeRunProps({ ...(target.rPr || {}) }, defRPr, theme);
+      return target;
+    }
+
+    function formatAutoNumber(scheme, n) {
+      const toRoman = (num) => {
+        const map = [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'],
+          [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']];
+        let out = '';
+        for (const [v, s] of map) while (num >= v) { out += s; num -= v; }
+        return out;
+      };
+      const toAlpha = (num) => {
+        let out = '';
+        while (num > 0) { num--; out = String.fromCharCode(97 + (num % 26)) + out; num = Math.floor(num / 26); }
+        return out;
+      };
+      let core = String(n);
+      if (scheme.startsWith('alphaLc')) core = toAlpha(n);
+      else if (scheme.startsWith('alphaUc')) core = toAlpha(n).toUpperCase();
+      else if (scheme.startsWith('romanLc')) core = toRoman(n).toLowerCase();
+      else if (scheme.startsWith('romanUc')) core = toRoman(n);
+      if (scheme.endsWith('ParenBoth')) return `(${core})`;
+      if (scheme.endsWith('ParenR')) return `${core})`;
+      if (scheme.endsWith('Plain')) return core;
+      if (scheme.endsWith('Minus')) return `${core} -`;
+      return `${core}.`;
+    }
+
+    function resolveFillStyle(containerNode, theme = DEFAULT_THEME) {
+      if (!containerNode) return null;
+      if (qDirectOne(containerNode, 'noFill')) return { type: 'none' };
+
+      const solid = qDirectOne(containerNode, 'solidFill');
+      if (solid) {
+        const color = resolveColorNode(solid, theme);
+        return color ? { type: 'solid', color } : null;
+      }
+
+      const grad = qDirectOne(containerNode, 'gradFill');
+      if (grad) {
+        const gsList = qAll(grad, 'gs');
+        const stops = gsList.map(gs => {
+          const pos = (Number(gs.getAttribute('pos') || 0) / 1000).toFixed(1) + '%';
+          const color = resolveColorNode(gs, theme) || '#ffffff';
+          return { pos, color };
+        });
+        const lin = qOne(grad, 'lin');
+        const angleDeg = lin ? (Number(lin.getAttribute('ang') || 0) / 60000 + 90) % 360 : 180;
+        const isRadial = Boolean(qOne(grad, 'path'));
+        if (stops.length > 0) {
+          const stopStr = stops.map(s => `${s.color} ${s.pos}`).join(', ');
+          const css = isRadial
+            ? `radial-gradient(circle, ${stopStr})`
+            : `linear-gradient(${angleDeg}deg, ${stopStr})`;
+          return { type: 'gradient', css, stops, angleDeg, isRadial };
+        }
+      }
+      return null;
+    }
+
+    function resolveLineStyle(spPrNode, theme = DEFAULT_THEME) {
+      const ln = qDirectOne(spPrNode, 'ln');
+      if (!ln) return null;
+      if (qDirectOne(ln, 'noFill')) return { width: 0, color: 'transparent', dash: 'solid' };
+      const wEmu = Number(ln.getAttribute('w') || 12700);
+      const width = Math.max(1, emuToPx(wEmu));
+      const color = resolveColorNode(ln, theme) || '#64748b';
+      const prstDash = qOne(ln, 'prstDash')?.getAttribute('val') || 'solid';
+      const dash = prstDash.includes('dot') ? 'dotted' : prstDash.includes('dash') ? 'dashed' : 'solid';
+      return { width, color, dash };
+    }
+
+    /* --------------------------------------------------------------------------
+       3. OPENXML (.PPTX) ARCHIVE PARSER
+       -------------------------------------------------------------------------- */
+    class OpenXMLParser {
+      constructor(onProgress = () => {}) {
+        this.onProgress = onProgress;
+        this.blobUrls = [];
+      }
+
+      async parse(arrayBuffer, fileName) {
+        this.onProgress(8, 'Unzipping PPTX archive…');
+        let zip;
+        try {
+          zip = await JSZip.loadAsync(arrayBuffer);
+        } catch (err) {
+          throw new Error(`Invalid or corrupted PPTX archive: ${err.message}`);
+        }
+
+        const presEntry = zip.file('ppt/presentation.xml');
+        if (!presEntry) {
+          throw new Error('Missing ppt/presentation.xml — file is not a valid PowerPoint presentation.');
+        }
+
+        this.onProgress(18, 'Reading presentation metadata & theme…');
+        const presDoc = parseXml(await presEntry.async('text'));
+        const presRels = await this.readRels(zip, 'ppt/presentation.xml');
+
+        // Dimensions (Default Widescreen 16:9 = 12192000 x 6858000 EMU = 1280 x 720 px)
+        const sldSz = qOne(presDoc, 'sldSz');
+        const cx = Number(sldSz?.getAttribute('cx') || 12192000);
+        const cy = Number(sldSz?.getAttribute('cy') || 6858000);
+        const widthPx = Math.round(emuToPx(cx));
+        const heightPx = Math.round(emuToPx(cy));
+
+        // Parse Theme
+        const theme = await this.parseTheme(zip, presRels);
+        this.defaultTextStyle = qOne(presDoc, 'defaultTextStyle');
+        this.partCache = new Map();
+
+        // Slide list ordered by p:sldIdLst
+        const sldIds = qAll(presDoc, 'sldId');
+        if (sldIds.length === 0) {
+          throw new Error('Presentation contains zero slides.');
+        }
+
+        const slides = [];
+        const total = sldIds.length;
+
+        for (let i = 0; i < total; i++) {
+          if (i % 5 === 0 || i === total - 1) {
+            const pct = 22 + Math.round(((i + 1) / total) * 72);
+            this.onProgress(pct, `Parsing slide ${i + 1} of ${total}…`);
+          }
+
+          const sldIdNode = sldIds[i];
+          const rId = sldIdNode.getAttribute('r:id') || sldIdNode.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+          const relTarget = presRels[rId]?.target;
+          const slidePath = resolveZipPath('ppt/presentation.xml', relTarget || `slides/slide${i + 1}.xml`);
+
+          try {
+            const slideModel = await this.parseSingleSlide(zip, slidePath, i + 1, theme);
+            slides.push(slideModel);
+          } catch (slideErr) {
+            slides.push({
+              index: i + 1,
+              title: `Slide ${i + 1} (Parse Warning)`,
+              background: { type: 'solid', color: '#ffffff' },
+              elements: [{
+                type: 'fallback',
+                x: 80, y: 120, w: widthPx - 160, h: 180, rot: 0,
+                label: `Slide ${i + 1} encountered a structural XML error: ${slideErr.message}`
+              }],
+              notes: '',
+              searchText: `Slide ${i + 1}`
+            });
+          }
+        }
+
+        this.onProgress(100, 'Ready');
+        return {
+          id: `deck-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: fileName,
+          width: widthPx,
+          height: heightPx,
+          aspectLabel: this.detectAspectLabel(widthPx, heightPx),
+          theme,
+          slides,
+          blobUrls: this.blobUrls,
+          originalBuffer: arrayBuffer
+        };
+      }
+
+      detectAspectLabel(w, h) {
+        const ratio = w / h;
+        if (Math.abs(ratio - 16 / 9) < 0.04) return `16:9 (${w}×${h})`;
+        if (Math.abs(ratio - 4 / 3) < 0.04) return `4:3 (${w}×${h})`;
+        if (Math.abs(ratio - 16 / 10) < 0.04) return `16:10 (${w}×${h})`;
+        return `${ratio.toFixed(2)}:1 (${w}×${h})`;
+      }
+
+      async readRels(zip, partPath) {
+        const parts = partPath.split('/');
+        const fileName = parts.pop();
+        const relsPath = [...parts, '_rels', `${fileName}.rels`].join('/');
+        const entry = zip.file(relsPath);
+        const map = {};
+        if (!entry) return map;
+
+        const doc = parseXml(await entry.async('text'));
+        for (const rel of qAll(doc, 'Relationship')) {
+          map[rel.getAttribute('Id')] = {
+            target: rel.getAttribute('Target'),
+            type: rel.getAttribute('Type') || '',
+            targetMode: rel.getAttribute('TargetMode') || 'Internal'
+          };
+        }
+        return map;
+      }
+
+      async parseTheme(zip, presRels) {
+        const theme = JSON.parse(JSON.stringify(DEFAULT_THEME));
+        const themeRel = Object.values(presRels).find(r => r.type.includes('/theme'));
+        const themePath = themeRel ? resolveZipPath('ppt/presentation.xml', themeRel.target) : 'ppt/theme/theme1.xml';
+        const entry = zip.file(themePath);
+        if (!entry) return theme;
+
+        try {
+          const doc = parseXml(await entry.async('text'));
+          const clrScheme = qOne(doc, 'clrScheme');
+          if (clrScheme) {
+            for (let child = clrScheme.firstElementChild; child; child = child.nextElementSibling) {
+              const col = resolveColorNode(child, theme);
+              if (col) theme.colors[child.localName] = col;
+            }
+          }
+          const readFonts = (node) => {
+            if (!node) return {};
+            const face = (tag) => qDirectOne(node, tag)?.getAttribute('typeface') || null;
+            const arab = qDirect(node, 'font').find(f => f.getAttribute('script') === 'Arab')?.getAttribute('typeface');
+            return { latin: face('latin'), ea: face('ea'), cs: face('cs') || arab || null };
+          };
+          const major = readFonts(qOne(doc, 'majorFont'));
+          const minor = readFonts(qOne(doc, 'minorFont'));
+          if (major.latin && !major.latin.startsWith('+')) theme.majorFont = major.latin;
+          if (minor.latin && !minor.latin.startsWith('+')) theme.minorFont = minor.latin;
+          theme.majorFontEa = major.ea;
+          theme.minorFontEa = minor.ea;
+          theme.majorFontCs = major.cs;
+          theme.minorFontCs = minor.cs;
+        } catch {
+          // Graceful fallback to DEFAULT_THEME
+        }
+        return theme;
+      }
+
+      async parseSingleSlide(zip, slidePath, slideNum, theme) {
+        const slideEntry = zip.file(slidePath);
+        if (!slideEntry) throw new Error(`Missing ${slidePath}`);
+        const slideDoc = parseXml(await slideEntry.async('text'));
+        const rels = await this.readRels(zip, slidePath);
+
+        // Resolve Layout & Master backgrounds if slide background isn't explicit
+        let background = this.extractBackground(slideDoc, theme);
+        let layoutDoc = null;
+        let masterDoc = null;
+        const layoutRel = Object.values(rels).find(r => r.type.includes('/slideLayout'));
+        if (layoutRel) {
+          const layoutPath = resolveZipPath(slidePath, layoutRel.target);
+          layoutDoc = await this.loadXmlPart(zip, layoutPath);
+          if (layoutDoc) {
+            if (!background) background = this.extractBackground(layoutDoc, theme);
+            const layoutRels = await this.readRels(zip, layoutPath);
+            const masterRel = Object.values(layoutRels).find(r => r.type.includes('/slideMaster'));
+            if (masterRel) {
+              masterDoc = await this.loadXmlPart(zip, resolveZipPath(layoutPath, masterRel.target));
+              if (!background && masterDoc) background = this.extractBackground(masterDoc, theme);
+            }
+          }
+        }
+        if (!background) background = { type: 'solid', color: '#ffffff' };
+        // Master is needed for text-style inheritance (fonts, sizes, anchors)
+        this.currentMasterDoc = masterDoc;
+
+        // Parse shape tree
+        const spTree = qOne(slideDoc, 'spTree');
+        const elements = await this.parseShapeTree(spTree, zip, slidePath, rels, theme, layoutDoc);
+
+        // Extract title & search corpus
+        let title = '';
+        const textChunks = [];
+        for (const el of elements) {
+          if (el.isTitle && el.plainText && !title) {
+            title = el.plainText.trim().split('\n')[0];
+          }
+          if (el.plainText) textChunks.push(el.plainText);
+        }
+        if (!title && textChunks.length > 0) {
+          title = textChunks[0].trim().split('\n')[0].slice(0, 80);
+        }
+        if (!title) title = `Slide ${slideNum}`;
+
+        // Parse Speaker Notes
+        const notes = await this.parseNotes(zip, slidePath, rels);
+
+        return {
+          index: slideNum,
+          title,
+          background,
+          elements,
+          notes,
+          searchText: `${title}\n${textChunks.join('\n')}\n${notes}`.trim()
+        };
+      }
+
+      async loadXmlPart(zip, path) {
+        if (!this.partCache) this.partCache = new Map();
+        if (this.partCache.has(path)) return this.partCache.get(path);
+        const entry = zip.file(path);
+        const doc = entry ? parseXml(await entry.async('text')) : null;
+        this.partCache.set(path, doc);
+        return doc;
+      }
+
+      extractBackground(doc, theme) {
+        const bg = qOne(doc, 'bg');
+        if (!bg) return null;
+        const bgPr = qOne(bg, 'bgPr');
+        if (bgPr) return resolveFillStyle(bgPr, theme);
+        const bgRef = qOne(bg, 'bgRef');
+        if (bgRef) {
+          const color = resolveColorNode(bgRef, theme);
+          return color ? { type: 'solid', color } : null;
+        }
+        return null;
+      }
+
+      async parseShapeTree(treeNode, zip, slidePath, rels, theme, layoutDoc, offset = { x: 0, y: 0 }) {
+        if (!treeNode) return [];
+        const items = [];
+
+        for (let child = treeNode.firstElementChild; child; child = child.nextElementSibling) {
+          const tag = child.localName;
+          if (tag === 'sp' || tag === 'cxnSp') {
+            const parsed = this.parseShapeOrText(child, rels, theme, layoutDoc, offset);
+            if (parsed) items.push(parsed);
+          } else if (tag === 'pic') {
+            const parsed = await this.parsePicture(child, zip, slidePath, rels, offset);
+            if (parsed) items.push(parsed);
+          } else if (tag === 'graphicFrame') {
+            const parsed = await this.parseGraphicFrame(child, zip, slidePath, rels, theme, offset);
+            if (parsed) items.push(parsed);
+          } else if (tag === 'grpSp') {
+            const grpItems = await this.parseGroup(child, zip, slidePath, rels, theme, layoutDoc, offset);
+            items.push(...grpItems);
+          }
+        }
+        return items;
+      }
+
+      extractTransform(spPrNode, fallbackNodes = null, offset = { x: 0, y: 0 }) {
+        let xfrm = qDirectOne(spPrNode, 'xfrm');
+        const fallbacks = Array.isArray(fallbackNodes) ? fallbackNodes : [fallbackNodes];
+        for (const node of fallbacks) {
+          if (xfrm) break;
+          if (node) xfrm = qDirectOne(qDirectOne(node, 'spPr'), 'xfrm');
+        }
+        if (!xfrm) return null;
+        const off = qDirectOne(xfrm, 'off');
+        const ext = qDirectOne(xfrm, 'ext');
+        if (!off || !ext) return null;
+        return {
+          x: emuToPx(off.getAttribute('x')) + offset.x,
+          y: emuToPx(off.getAttribute('y')) + offset.y,
+          w: Math.max(1, emuToPx(ext.getAttribute('cx'))),
+          h: Math.max(1, emuToPx(ext.getAttribute('cy'))),
+          rot: Number(xfrm.getAttribute('rot') || 0) / 60000,
+          flipH: xfrm.getAttribute('flipH') === '1',
+          flipV: xfrm.getAttribute('flipV') === '1'
+        };
+      }
+
+      /**
+       * Locate the matching placeholder on the layout (by idx, then type) and on the
+       * master (by normalized type) so position + text styles can be inherited.
+       */
+      findPlaceholders(spNode, layoutDoc, masterDoc) {
+        const phOf = (s) => qOne(qDirectOne(s, 'nvSpPr'), 'ph');
+        const ph = phOf(spNode);
+        if (!ph) return { layoutPh: null, masterPh: null };
+        const norm = (t) => ({ ctrTitle: 'title', subTitle: 'body', obj: 'body', '': 'body' })[t || ''] || t;
+        const shapesOf = (doc) => (doc ? qAll(qOne(doc, 'spTree'), 'sp').filter(s => phOf(s)) : []);
+
+        const type = ph.getAttribute('type') || '';
+        const idx = ph.getAttribute('idx');
+        const layoutShapes = shapesOf(layoutDoc);
+        let layoutPh = null;
+        if (idx) layoutPh = layoutShapes.find(s => phOf(s).getAttribute('idx') === idx) || null;
+        if (!layoutPh && type) layoutPh = layoutShapes.find(s => (phOf(s).getAttribute('type') || '') === type) || null;
+        if (!layoutPh) layoutPh = layoutShapes.find(s => norm(phOf(s).getAttribute('type')) === norm(type)) || null;
+
+        const effType = norm((layoutPh && phOf(layoutPh).getAttribute('type')) || type);
+        const masterPh = shapesOf(masterDoc).find(s => norm(phOf(s).getAttribute('type')) === effType) || null;
+        return { layoutPh, masterPh };
+      }
+
+      parseShapeOrText(spNode, rels, theme, layoutDoc, offset) {
+        const spPr = qDirectOne(spNode, 'spPr');
+        const phNode = qOne(qDirectOne(spNode, 'nvSpPr'), 'ph');
+        const phType = phNode?.getAttribute('type') || '';
+        const isTitle = phType === 'title' || phType === 'ctrTitle';
+        const masterDoc = this.currentMasterDoc || null;
+        const { layoutPh, masterPh } = this.findPlaceholders(spNode, layoutDoc, masterDoc);
+
+        const box = this.extractTransform(spPr, [layoutPh, masterPh], offset);
+        if (!box) return null;
+
+        const prstGeom = qOne(spPr, 'prstGeom')?.getAttribute('rect') || qOne(spPr, 'prstGeom')?.getAttribute('prst') || 'rect';
+        const fill = resolveFillStyle(spPr, theme);
+        const line = resolveLineStyle(spPr, theme);
+
+        // Check quick style fallback (p:style -> fillRef) if no explicit fill
+        let resolvedFill = fill;
+        if (!resolvedFill) {
+          const fillRef = qOne(qDirectOne(spNode, 'style'), 'fillRef');
+          if (fillRef && Number(fillRef.getAttribute('idx') || 0) > 0) {
+            const c = resolveColorNode(fillRef, theme);
+            if (c) resolvedFill = { type: 'solid', color: c };
+          }
+        }
+
+        const txBody = qDirectOne(spNode, 'txBody');
+        let textData = null;
+        if (txBody) {
+          const txStyles = qOne(masterDoc, 'txStyles');
+          const lstOf = (s) => qDirectOne(qDirectOne(s, 'txBody'), 'lstStyle');
+          const bodyPrOf = (s) => qDirectOne(qDirectOne(s, 'txBody'), 'bodyPr');
+          let lstChain = [this.defaultTextStyle];
+          if (phNode) {
+            const effType = phType || qOne(qDirectOne(layoutPh, 'nvSpPr'), 'ph')?.getAttribute('type') || '';
+            const styleName = (effType === 'title' || effType === 'ctrTitle')
+              ? 'titleStyle'
+              : (['dt', 'ftr', 'sldNum', 'hdr'].includes(effType) ? 'otherStyle' : 'bodyStyle');
+            lstChain.push(qDirectOne(txStyles, styleName), lstOf(masterPh), lstOf(layoutPh));
+          }
+
+          // Shape quick-style font reference (e.g. white text on filled shapes)
+          let baseRun = null;
+          const fontRef = qOne(qDirectOne(spNode, 'style'), 'fontRef');
+          if (fontRef) {
+            baseRun = {};
+            const c = resolveColorNode(fontRef, theme);
+            if (c) baseRun.color = c;
+            const fIdx = fontRef.getAttribute('idx');
+            if (fIdx === 'major') baseRun.latin = '+mj-lt';
+            else if (fIdx === 'minor') baseRun.latin = '+mn-lt';
+          }
+
+          textData = this.parseTextBody(txBody, rels, theme, isTitle, {
+            lstChain: lstChain.filter(Boolean),
+            bodyPrChain: [bodyPrOf(masterPh), bodyPrOf(layoutPh)].filter(Boolean),
+            baseRun
+          });
+        }
+
+        return {
+          type: 'shape',
+          ...box,
+          geom: prstGeom,
+          fill: resolvedFill,
+          line,
+          isTitle,
+          text: textData,
+          plainText: textData ? textData.plainText : ''
+        };
+      }
+
+      parseTextBody(txBody, rels, theme, isTitle = false, inherit = null) {
+        // ---- Body properties (insets, anchor, autofit) inherited master → layout → shape
+        const bodyPrChain = [...(inherit?.bodyPrChain || []), qDirectOne(txBody, 'bodyPr')].filter(Boolean);
+        const bp = {};
+        let autofit = null;
+        for (const node of bodyPrChain) {
+          for (const a of ['anchor', 'lIns', 'rIns', 'tIns', 'bIns', 'wrap', 'vert']) {
+            if (node.hasAttribute(a)) bp[a] = node.getAttribute(a);
+          }
+          const norm = qDirectOne(node, 'normAutofit');
+          if (norm) {
+            autofit = {
+              fontScale: Number(norm.getAttribute('fontScale') || 100000) / 100000,
+              lnSpcReduction: Number(norm.getAttribute('lnSpcReduction') || 0) / 100000
+            };
+          } else if (qDirectOne(node, 'noAutofit') || qDirectOne(node, 'spAutoFit')) {
+            autofit = null;
+          }
+        }
+        const fontScale = autofit?.fontScale || 1;
+        const lnSpcReduction = autofit?.lnSpcReduction || 0;
+        // Office defaults: 0.1" left/right (9.6px), 0.05" top/bottom (4.8px)
+        const ins = (k, def) => (bp[k] !== undefined ? emuToPx(bp[k]) : def);
+        const lIns = ins('lIns', 9.6);
+        const rIns = ins('rIns', 9.6);
+        const tIns = ins('tIns', 4.8);
+        const bIns = ins('bIns', 4.8);
+        const anchorMap = { t: 'flex-start', ctr: 'center', b: 'flex-end', just: 'flex-start', dist: 'flex-start' };
+        const vAlign = anchorMap[bp.anchor] || 'flex-start';
+
+        const inheritedLsts = inherit?.lstChain || [];
+        const ownLst = qDirectOne(txBody, 'lstStyle');
+        const defaultSize = isTitle ? 44 : 18;
+        const alignMap = { l: 'left', r: 'right', ctr: 'center', just: 'justify', dist: 'justify', justLow: 'justify', thaiDist: 'justify' };
+
+        const paragraphs = [];
+        const plainLines = [];
+        const autoState = [];
+
+        for (const pNode of qDirect(txBody, 'p')) {
+          const pPr = qDirectOne(pNode, 'pPr');
+          const lvl = Math.max(0, Math.min(8, Number(pPr?.getAttribute('lvl') || 0)));
+
+          // ---- Resolve paragraph style through the cascade
+          const ps = { rPr: {} };
+          const applyLst = (lst) => {
+            mergeParaProps(ps, qDirectOne(lst, 'defPPr'), theme);
+            mergeParaProps(ps, qDirectOne(lst, `lvl${lvl + 1}pPr`), theme);
+          };
+          inheritedLsts.forEach(applyLst);
+          if (inherit?.baseRun) ps.rPr = { ...ps.rPr, ...inherit.baseRun };
+          if (ownLst) applyLst(ownLst);
+          mergeParaProps(ps, pPr, theme);
+
+          const makeRun = (rPrNode, text) => {
+            const rp = mergeRunProps({ ...ps.rPr }, rPrNode, theme);
+            const arabic = containsArabic(text);
+            const face = resolveThemeTypeface(arabic ? (rp.cs || rp.latin) : (rp.latin || rp.ea), theme)
+              || (isTitle ? theme.majorFont : theme.minorFont);
+            const baseline = Number(rp.baseline || 0) / 1000;
+            return {
+              text,
+              fontSizePt: (rp.sz ? Number(rp.sz) / 100 : defaultSize) * fontScale,
+              bold: rp.b === '1' || rp.b === 'true',
+              italic: rp.i === '1' || rp.i === 'true',
+              underline: Boolean(rp.u && rp.u !== 'none'),
+              strike: Boolean(rp.strike && rp.strike !== 'noStrike'),
+              caps: rp.cap || 'none',
+              baseline,
+              letterSpacingPt: rp.spc ? Number(rp.spc) / 100 : 0,
+              highlight: rp.highlight || null,
+              color: rp.color || '#111827',
+              fontFamily: buildFontStack(face, arabic)
+            };
+          };
+
+          const runs = [];
+          let pPlain = '';
+
+          for (let child = pNode.firstElementChild; child; child = child.nextElementSibling) {
+            if (child.localName === 'r' || child.localName === 'fld') {
+              const rPr = qDirectOne(child, 'rPr');
+              const tNode = qDirectOne(child, 't');
+              const txt = tNode ? tNode.textContent : '';
+              if (!txt) continue;
+              pPlain += txt;
+
+              const run = makeRun(rPr, txt);
+              const hlink = qOne(rPr, 'hlinkClick');
+              const hlinkId = hlink?.getAttribute('r:id') || hlink?.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+              run.href = hlinkId && rels[hlinkId]?.targetMode === 'External' ? rels[hlinkId].target : null;
+              runs.push(run);
+            } else if (child.localName === 'br') {
+              runs.push(makeRun(qDirectOne(child, 'rPr'), '\n'));
+              pPlain += '\n';
+            }
+          }
+
+          // Empty paragraphs still occupy one line at the end-of-paragraph size
+          const endRun = makeRun(qDirectOne(pNode, 'endParaRPr'), '​');
+          const hasText = Boolean(pPlain.replace(/\n/g, '').trim());
+          if (runs.length === 0 || runs[runs.length - 1].text === '\n') runs.push(endRun);
+          const firstRun = runs.find(r => r.text !== '\n' && r.text !== '​') || endRun;
+          const baseSizePt = firstRun.fontSizePt;
+
+          const ownRtl = pPr?.getAttribute('rtl');
+          const isRtl = ownRtl === '1' || (ownRtl !== '0' && (ps.rtl === '1' || containsArabic(pPlain)));
+          // An inherited "left" from an LTR master shouldn't left-align Arabic text
+          const ownAlgn = pPr?.getAttribute('algn');
+          const textAlign = alignMap[ownAlgn]
+            || (isRtl && (!ps.algn || ps.algn === 'l') ? 'right' : (alignMap[ps.algn] || 'left'));
+
+          // ---- Bullets & auto numbering
+          let bullet = '';
+          if (hasText && ps.bullet?.type === 'char') {
+            bullet = ps.bullet.char;
+            for (let k = lvl; k < 9; k++) autoState[k] = null;
+          } else if (hasText && ps.bullet?.type === 'auto') {
+            const prev = autoState[lvl];
+            const n = prev && prev.scheme === ps.bullet.scheme ? prev.n + 1 : ps.bullet.startAt;
+            autoState[lvl] = { scheme: ps.bullet.scheme, n };
+            for (let k = lvl + 1; k < 9; k++) autoState[k] = null;
+            bullet = formatAutoNumber(ps.bullet.scheme, n);
+          } else if (hasText) {
+            for (let k = lvl; k < 9; k++) autoState[k] = null;
+          }
+          const bulletFace = ps.buFont ? resolveThemeTypeface(ps.buFont, theme) : null;
+          const bulletStyle = bullet ? {
+            color: ps.buClr || firstRun.color,
+            fontSizePt: firstRun.fontSizePt * (ps.buSzPct || 1),
+            fontFamily: bulletFace ? buildFontStack(bulletFace) : firstRun.fontFamily
+          } : null;
+
+          // ---- Line spacing: PowerPoint "single" ≈ 1.2 × font size
+          let lineHeight = String(1.2 * (1 - lnSpcReduction));
+          if (ps.lnSpc?.pct !== undefined) lineHeight = String(Math.max(0.3, ps.lnSpc.pct - lnSpcReduction) * 1.2);
+          else if (ps.lnSpc?.pts !== undefined) lineHeight = `${ps.lnSpc.pts}pt`;
+
+          const spacingCss = (s) => {
+            if (!s) return '0';
+            if (s.pts !== undefined) return `${s.pts}pt`;
+            return `${s.pct * 1.2 * baseSizePt}pt`;
+          };
+
+          if (hasText) plainLines.push(pPlain);
+
+          paragraphs.push({
+            runs,
+            bullet,
+            bulletStyle,
+            lvl,
+            isRtl,
+            textAlign,
+            lineHeight,
+            // PowerPoint ignores "space before" on the first paragraph of a text box
+            marginTop: paragraphs.length === 0 ? '0' : spacingCss(ps.spcBef),
+            marginBottom: spacingCss(ps.spcAft),
+            marL: ps.marL ? emuToPx(ps.marL) : 0,
+            indent: ps.indent ? emuToPx(ps.indent) : 0,
+            baseSizePt,
+            baseFontFamily: firstRun.fontFamily
+          });
+        }
+
+        return {
+          padding: `${tIns}px ${rIns}px ${bIns}px ${lIns}px`,
+          vAlign,
+          noWrap: bp.wrap === 'none',
+          vert: bp.vert || 'horz',
+          paragraphs,
+          plainText: plainLines.join('\n')
+        };
+      }
+
+      async parsePicture(picNode, zip, slidePath, rels, offset) {
+        const spPr = qDirectOne(picNode, 'spPr');
+        const box = this.extractTransform(spPr, null, offset);
+        if (!box) return null;
+
+        const blip = qOne(picNode, 'blip');
+        const embedId = blip?.getAttribute('r:embed') || blip?.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+        if (!embedId || !rels[embedId]) return null;
+
+        const mediaPath = resolveZipPath(slidePath, rels[embedId].target);
+        const mediaEntry = zip.file(mediaPath);
+        if (!mediaEntry) {
+          return {
+            type: 'fallback',
+            ...box,
+            label: `Missing embedded image (${mediaPath})`
+          };
+        }
+
+        const blob = await mediaEntry.async('blob');
+        const url = URL.createObjectURL(blob);
+        this.blobUrls.push(url);
+
+        // Optional image cropping (a:srcRect in 1/1000ths of a percent)
+        const srcRect = qOne(picNode, 'srcRect');
+        const crop = srcRect ? {
+          l: Number(srcRect.getAttribute('l') || 0) / 100000,
+          r: Number(srcRect.getAttribute('r') || 0) / 100000,
+          t: Number(srcRect.getAttribute('t') || 0) / 100000,
+          b: Number(srcRect.getAttribute('b') || 0) / 100000
+        } : null;
+
+        return {
+          type: 'image',
+          ...box,
+          url,
+          crop,
+          line: resolveLineStyle(spPr)
+        };
+      }
+
+      async parseGraphicFrame(frameNode, zip, slidePath, rels, theme, offset) {
+        const xfrm = qDirectOne(frameNode, 'xfrm');
+        if (!xfrm) return null;
+        const off = qDirectOne(xfrm, 'off');
+        const ext = qDirectOne(xfrm, 'ext');
+        if (!off || !ext) return null;
+
+        const box = {
+          x: emuToPx(off.getAttribute('x')) + offset.x,
+          y: emuToPx(off.getAttribute('y')) + offset.y,
+          w: Math.max(10, emuToPx(ext.getAttribute('cx'))),
+          h: Math.max(10, emuToPx(ext.getAttribute('cy'))),
+          rot: Number(xfrm.getAttribute('rot') || 0) / 60000
+        };
+
+        const graphicData = qOne(frameNode, 'graphicData');
+        const uri = graphicData?.getAttribute('uri') || '';
+
+        // 1. Native PowerPoint Table
+        const tbl = qOne(graphicData, 'tbl');
+        if (tbl || uri.includes('/table')) {
+          return this.parseTable(tbl, box, rels, theme);
+        }
+
+        // 2. Native OpenXML Chart
+        const chartRef = qOne(graphicData, 'chart');
+        if (chartRef || uri.includes('/chart')) {
+          const rId = chartRef?.getAttribute('r:id') || chartRef?.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+          if (rId && rels[rId]) {
+            const chartPath = resolveZipPath(slidePath, rels[rId].target);
+            const chartModel = await this.parseChart(zip, chartPath, box, theme);
+            if (chartModel) return chartModel;
+          }
+        }
+
+        // 3. SmartArt / Diagram / OLE Fallback
+        const kind = uri.includes('diagram') ? 'SmartArt Diagram' : uri.includes('ole') ? 'Embedded OLE Object' : 'Complex Graphic Frame';
+        return {
+          type: 'fallback',
+          ...box,
+          label: `${kind} (Unsupported OpenXML extension — preserved in original PPTX)`
+        };
+      }
+
+      parseTable(tblNode, box, rels, theme) {
+        if (!tblNode) return null;
+        const gridCols = qAll(qOne(tblNode, 'tblGrid'), 'gridCol').map(c => emuToPx(c.getAttribute('w')));
+        const totalGridW = gridCols.reduce((a, b) => a + b, 0) || box.w;
+        const colWidthsPct = gridCols.map(w => `${((w / totalGridW) * 100).toFixed(2)}%`);
+
+        const rows = [];
+        const plainChunks = [];
+
+        qDirect(tblNode, 'tr').forEach((trNode, rIdx) => {
+          const rowHeight = emuToPx(trNode.getAttribute('h') || 342900);
+          const cells = [];
+
+          qDirect(trNode, 'tc').forEach((tcNode, cIdx) => {
+            if (tcNode.getAttribute('hMerge') === '1' || tcNode.getAttribute('vMerge') === '1') {
+              return; // Spanned by parent cell
+            }
+            const colSpan = Number(tcNode.getAttribute('gridSpan') || 1);
+            const rowSpan = Number(tcNode.getAttribute('rowSpan') || 1);
+            const tcPr = qDirectOne(tcNode, 'tcPr');
+            const fill = resolveFillStyle(tcPr, theme);
+            const defaultBg = rIdx === 0 ? theme.colors.accent1 : (rIdx % 2 === 1 ? '#f8fafc' : '#ffffff');
+            const bgColor = fill?.type === 'solid' ? fill.color : defaultBg;
+
+            const txBody = qDirectOne(tcNode, 'txBody');
+            const textData = txBody ? this.parseTextBody(txBody, rels, theme, false) : null;
+            if (textData?.plainText) plainChunks.push(textData.plainText);
+
+            // Header row white text fallback if no explicit color
+            if (rIdx === 0 && textData) {
+              textData.paragraphs.forEach(p => p.runs.forEach(r => {
+                if (r.color === '#111827') r.color = '#ffffff';
+                r.bold = true;
+              }));
+            }
+
+            cells.push({
+              colSpan,
+              rowSpan,
+              bgColor,
+              text: textData
+            });
+          });
+
+          rows.push({ height: rowHeight, cells });
+        });
+
+        return {
+          type: 'table',
+          ...box,
+          colWidthsPct,
+          rows,
+          plainText: plainChunks.join(' ')
+        };
+      }
+
+      async parseChart(zip, chartPath, box, theme) {
+        const entry = zip.file(chartPath);
+        if (!entry) return null;
+        try {
+          const doc = parseXml(await entry.async('text'));
+          const titleTexts = qAll(qOne(doc, 'title'), 't').map(t => t.textContent).join('').trim();
+
+          let chartKind = 'bar';
+          if (qOne(doc, 'lineChart')) chartKind = 'line';
+          else if (qOne(doc, 'pieChart') || qOne(doc, 'doughnutChart')) chartKind = 'pie';
+          else if (qOne(doc, 'barChart')) {
+            const dir = qOne(qOne(doc, 'barChart'), 'barDir')?.getAttribute('val');
+            chartKind = dir === 'bar' ? 'horizontalBar' : 'bar';
+          }
+
+          const seriesList = [];
+          const serNodes = qAll(doc, 'ser');
+          const palette = [
+            theme.colors.accent1, theme.colors.accent2, theme.colors.accent3,
+            theme.colors.accent4, theme.colors.accent5, theme.colors.accent6
+          ];
+
+          serNodes.forEach((ser, idx) => {
+            const name = qAll(qDirectOne(ser, 'tx'), 't').map(t => t.textContent).join('').trim() || `Series ${idx + 1}`;
+            const cats = qAll(qDirectOne(ser, 'cat'), 'v').map(v => v.textContent);
+            const vals = qAll(qDirectOne(ser, 'val'), 'v').map(v => Number(v.textContent) || 0);
+            const explicitColor = resolveColorNode(qDirectOne(ser, 'spPr'), theme);
+            seriesList.push({
+              name,
+              categories: cats,
+              values: vals,
+              color: explicitColor || palette[idx % palette.length]
+            });
+          });
+
+          if (seriesList.length === 0) return null;
+
+          return {
+            type: 'chart',
+            ...box,
+            chartKind,
+            title: titleTexts,
+            series: seriesList,
+            plainText: `${titleTexts} ${seriesList.map(s => `${s.name} ${s.categories.join(' ')}`).join(' ')}`
+          };
+        } catch {
+          return null;
+        }
+      }
+
+      async parseGroup(grpNode, zip, slidePath, rels, theme, layoutDoc, parentOffset) {
+        const grpSpPr = qDirectOne(grpNode, 'grpSpPr');
+        const xfrm = qDirectOne(grpSpPr, 'xfrm');
+        let nextOffset = { ...parentOffset };
+
+        if (xfrm) {
+          const off = qDirectOne(xfrm, 'off');
+          const chOff = qDirectOne(xfrm, 'chOff');
+          if (off && chOff) {
+            nextOffset = {
+              x: parentOffset.x + emuToPx(off.getAttribute('x')) - emuToPx(chOff.getAttribute('x')),
+              y: parentOffset.y + emuToPx(off.getAttribute('y')) - emuToPx(chOff.getAttribute('y'))
+            };
+          }
+        }
+        return this.parseShapeTree(grpNode, zip, slidePath, rels, theme, layoutDoc, nextOffset);
+      }
+
+      async parseNotes(zip, slidePath, rels) {
+        const notesRel = Object.values(rels).find(r => r.type.includes('/notesSlide'));
+        if (!notesRel) return '';
+        const notesPath = resolveZipPath(slidePath, notesRel.target);
+        const entry = zip.file(notesPath);
+        if (!entry) return '';
+
+        try {
+          const doc = parseXml(await entry.async('text'));
+          const lines = [];
+          for (const sp of qAll(doc, 'sp')) {
+            const phType = qOne(sp, 'ph')?.getAttribute('type');
+            if (phType === 'sldImg' || phType === 'sldNum') continue;
+            for (const p of qAll(sp, 'p')) {
+              const pText = qAll(p, 't').map(t => t.textContent).join('');
+              if (pText.trim()) lines.push(pText);
+            }
+          }
+          return lines.join('\n\n').trim();
+        } catch {
+          return '';
+        }
+      }
+    }
+
+    /* --------------------------------------------------------------------------
+       4. HIGH-FIDELITY SLIDE RENDERER (DOM + SVG + CHARTS + ERROR ISOLATION)
+       -------------------------------------------------------------------------- */
+    class SlideRenderer {
+      static renderSlide(deck, slide, targetContainer) {
+        targetContainer.innerHTML = '';
+        targetContainer.style.width = `${deck.width}px`;
+        targetContainer.style.height = `${deck.height}px`;
+
+        // Apply slide background
+        if (slide.background?.type === 'solid') {
+          targetContainer.style.background = slide.background.color;
+        } else if (slide.background?.type === 'gradient') {
+          targetContainer.style.background = slide.background.css;
+        } else {
+          targetContainer.style.background = '#ffffff';
+        }
+
+        const frag = document.createDocumentFragment();
+        for (const el of slide.elements) {
+          try {
+            const domEl = this.renderElement(el);
+            if (domEl) frag.appendChild(domEl);
+          } catch (err) {
+            const errBox = document.createElement('div');
+            errBox.className = 'pptx-el pptx-fallback-box';
+            errBox.style.left = `${el.x || 40}px`;
+            errBox.style.top = `${el.y || 40}px`;
+            errBox.style.width = `${el.w || 240}px`;
+            errBox.style.height = `${el.h || 80}px`;
+            errBox.textContent = `Element render isolated: ${err.message}`;
+            frag.appendChild(errBox);
+          }
+        }
+        targetContainer.appendChild(frag);
+      }
+
+      static renderElement(el) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'pptx-el';
+        wrapper.style.left = `${el.x}px`;
+        wrapper.style.top = `${el.y}px`;
+        wrapper.style.width = `${el.w}px`;
+        wrapper.style.height = `${el.h}px`;
+
+        const transforms = [];
+        if (el.rot) transforms.push(`rotate(${el.rot}deg)`);
+        if (el.flipH) transforms.push('scaleX(-1)');
+        if (el.flipV) transforms.push('scaleY(-1)');
+        if (transforms.length) wrapper.style.transform = transforms.join(' ');
+
+        switch (el.type) {
+          case 'shape':
+            return this.renderShape(wrapper, el);
+          case 'image':
+            return this.renderImage(wrapper, el);
+          case 'table':
+            return this.renderTable(wrapper, el);
+          case 'chart':
+            return this.renderChart(wrapper, el);
+          case 'fallback':
+          default:
+            wrapper.innerHTML = `<div class="pptx-fallback-box">${DOMPurify.sanitize(el.label || 'Unsupported Element')}</div>`;
+            return wrapper;
+        }
+      }
+
+      static renderShape(wrapper, el) {
+        const isComplexSvgGeom = ['rightArrow', 'leftArrow', 'upArrow', 'downArrow', 'star5', 'triangle', 'rtTriangle', 'diamond', 'line', 'straightConnector1'].includes(el.geom);
+
+        if (isComplexSvgGeom) {
+          const svg = this.createGeometrySvg(el);
+          wrapper.appendChild(svg);
+        } else {
+          if (el.fill?.type === 'solid') wrapper.style.background = el.fill.color;
+          else if (el.fill?.type === 'gradient') wrapper.style.background = el.fill.css;
+
+          if (el.line && el.line.width > 0) {
+            wrapper.style.border = `${el.line.width}px ${el.line.dash} ${el.line.color}`;
+          }
+
+          if (el.geom === 'ellipse') wrapper.style.borderRadius = '50%';
+          else if (el.geom === 'roundRect') wrapper.style.borderRadius = '14px';
+        }
+
+        if (el.text && el.text.paragraphs.length > 0) {
+          const tx = document.createElement('div');
+          tx.className = 'pptx-textbox';
+          tx.style.position = 'relative';
+          tx.style.width = '100%';
+          tx.style.height = '100%';
+          tx.style.boxSizing = 'border-box';
+          tx.style.padding = el.text.padding;
+          tx.style.justifyContent = el.text.vAlign;
+          if (el.text.noWrap) tx.classList.add('nowrap');
+          if (el.text.vert === 'vert' || el.text.vert === 'eaVert') {
+            tx.style.writingMode = 'vertical-rl';
+          } else if (el.text.vert === 'vert270') {
+            tx.style.writingMode = 'vertical-rl';
+            tx.style.transform = 'rotate(180deg)';
+          }
+
+          for (const p of el.text.paragraphs) {
+            const pEl = this.renderParagraph(p);
+            tx.appendChild(pEl);
+          }
+          wrapper.appendChild(tx);
+        }
+
+        return wrapper;
+      }
+
+      static createGeometrySvg(el) {
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('viewBox', '0 0 100 100');
+        svg.setAttribute('preserveAspectRatio', 'none');
+        svg.style.position = 'absolute';
+        svg.style.inset = '0';
+        svg.style.width = '100%';
+        svg.style.height = '100%';
+
+        const fillVal = el.fill?.type === 'solid' ? el.fill.color : (el.fill?.type === 'gradient' ? el.fill.stops[0].color : 'none');
+        const strokeVal = el.line && el.line.width > 0 ? el.line.color : 'none';
+        const strokeW = el.line ? Math.max(1, el.line.width) : 0;
+
+        let shapeEl;
+        if (el.geom === 'line' || el.geom === 'straightConnector1') {
+          shapeEl = document.createElementNS(ns, 'line');
+          shapeEl.setAttribute('x1', '0');
+          shapeEl.setAttribute('y1', '50');
+          shapeEl.setAttribute('x2', '100');
+          shapeEl.setAttribute('y2', '50');
+          shapeEl.setAttribute('stroke', strokeVal === 'none' ? '#4f5bd5' : strokeVal);
+          shapeEl.setAttribute('stroke-width', String(Math.max(2, strokeW)));
+          svg.appendChild(shapeEl);
+          return svg;
+        }
+
+        shapeEl = document.createElementNS(ns, 'polygon');
+        const pointsMap = {
+          triangle: '50,4 96,96 4,96',
+          rtTriangle: '4,4 96,96 4,96',
+          diamond: '50,2 98,50 50,98 2,50',
+          rightArrow: '0,28 64,28 64,8 100,50 64,92 64,72 0,72',
+          leftArrow: '100,28 36,28 36,8 0,50 36,92 36,72 100,72',
+          upArrow: '28,100 28,36 8,36 50,0 92,36 72,36 72,100',
+          downArrow: '28,0 28,64 8,64 50,100 92,64 72,64 72,0',
+          star5: '50,2 62,36 98,36 69,58 80,94 50,72 20,94 31,58 2,36 38,36'
+        };
+        shapeEl.setAttribute('points', pointsMap[el.geom] || '0,0 100,0 100,100 0,100');
+        shapeEl.setAttribute('fill', fillVal);
+        shapeEl.setAttribute('stroke', strokeVal);
+        shapeEl.setAttribute('stroke-width', String(strokeW));
+        shapeEl.setAttribute('vector-effect', 'non-scaling-stroke');
+        svg.appendChild(shapeEl);
+        return svg;
+      }
+
+      static renderParagraph(p) {
+        const pEl = document.createElement('p');
+        pEl.className = 'pptx-p';
+        pEl.dir = p.isRtl ? 'rtl' : 'ltr';
+        pEl.style.textAlign = p.textAlign;
+        pEl.style.lineHeight = String(p.lineHeight);
+        pEl.style.marginTop = p.marginTop;
+        pEl.style.marginBottom = p.marginBottom;
+        // Paragraph font drives the line "strut", so it must match the runs
+        if (p.baseSizePt) pEl.style.fontSize = `${p.baseSizePt}pt`;
+        if (p.baseFontFamily) pEl.style.fontFamily = p.baseFontFamily;
+
+        // marL = left margin of the text, indent = first-line offset (negative = hanging)
+        if (p.marL) pEl.style[p.isRtl ? 'paddingRight' : 'paddingLeft'] = `${p.marL}px`;
+        if (p.indent) pEl.style.textIndent = `${p.indent}px`;
+
+        if (p.bullet && p.runs.length > 0) {
+          const bs = p.bulletStyle || {};
+          const bSpan = document.createElement('span');
+          bSpan.className = 'pptx-run pptx-bullet';
+          bSpan.textContent = p.bullet;
+          bSpan.style.color = bs.color || p.runs[0].color;
+          bSpan.style.fontSize = `${bs.fontSizePt || p.runs[0].fontSizePt}pt`;
+          if (bs.fontFamily) bSpan.style.fontFamily = bs.fontFamily;
+          if (p.indent < 0) bSpan.style.minWidth = `${-p.indent}px`;
+          else bSpan.style.paddingInlineEnd = '0.4em';
+          pEl.appendChild(bSpan);
+        }
+
+        for (const r of p.runs) {
+          const span = document.createElement('span');
+          span.className = 'pptx-run';
+          let sizePt = r.fontSizePt;
+          if (r.baseline) {
+            sizePt = r.fontSizePt * 0.65;
+            span.style.verticalAlign = `${(r.fontSizePt * r.baseline) / 100}pt`;
+          }
+          span.style.fontSize = `${sizePt}pt`;
+          span.style.color = r.color;
+          span.style.fontFamily = r.fontFamily;
+          if (r.bold) span.style.fontWeight = '700';
+          if (r.italic) span.style.fontStyle = 'italic';
+          if (r.caps === 'all') span.style.textTransform = 'uppercase';
+          else if (r.caps === 'small') span.style.fontVariant = 'small-caps';
+          if (r.letterSpacingPt) span.style.letterSpacing = `${r.letterSpacingPt}pt`;
+          if (r.highlight) span.style.backgroundColor = r.highlight;
+          const decos = [];
+          if (r.underline) decos.push('underline');
+          if (r.strike) decos.push('line-through');
+          if (decos.length) span.style.textDecoration = decos.join(' ');
+
+          if (r.href) {
+            const a = document.createElement('a');
+            a.href = DOMPurify.sanitize(r.href);
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = r.text;
+            span.appendChild(a);
+          } else {
+            span.textContent = r.text;
+          }
+          pEl.appendChild(span);
+        }
+
+        return pEl;
+      }
+
+      static renderImage(wrapper, el) {
+        wrapper.style.overflow = 'hidden';
+        if (el.line && el.line.width > 0) {
+          wrapper.style.border = `${el.line.width}px ${el.line.dash} ${el.line.color}`;
+        }
+        const img = document.createElement('img');
+        img.src = el.url;
+        img.alt = 'Slide embedded graphic';
+        img.draggable = false;
+        img.style.width = '100%';
+        img.style.height = '100%';
+        img.style.objectFit = 'fill';
+        img.style.display = 'block';
+
+        if (el.crop) {
+          const scaleX = 1 / Math.max(0.05, 1 - el.crop.l - el.crop.r);
+          const scaleY = 1 / Math.max(0.05, 1 - el.crop.t - el.crop.b);
+          img.style.transformOrigin = 'top left';
+          img.style.transform = `scale(${scaleX}, ${scaleY}) translate(${-el.crop.l * 100}%, ${-el.crop.t * 100}%)`;
+        }
+
+        wrapper.appendChild(img);
+        return wrapper;
+      }
+
+      static renderTable(wrapper, el) {
+        const table = document.createElement('table');
+        table.className = 'pptx-table';
+
+        if (el.colWidthsPct.length > 0) {
+          const colgroup = document.createElement('colgroup');
+          for (const wPct of el.colWidthsPct) {
+            const col = document.createElement('col');
+            col.style.width = wPct;
+            colgroup.appendChild(col);
+          }
+          table.appendChild(colgroup);
+        }
+
+        const tbody = document.createElement('tbody');
+        for (const row of el.rows) {
+          const tr = document.createElement('tr');
+          if (row.height) tr.style.height = `${row.height}px`;
+
+          for (const cell of row.cells) {
+            const td = document.createElement('td');
+            if (cell.colSpan > 1) td.colSpan = cell.colSpan;
+            if (cell.rowSpan > 1) td.rowSpan = cell.rowSpan;
+            td.style.background = cell.bgColor;
+            td.style.border = '1px solid rgba(148, 163, 184, 0.45)';
+            td.style.padding = '6px 10px';
+
+            if (cell.text) {
+              for (const p of cell.text.paragraphs) {
+                td.appendChild(this.renderParagraph(p));
+              }
+            }
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        wrapper.appendChild(table);
+        return wrapper;
+      }
+
+      static renderChart(wrapper, el) {
+        wrapper.style.background = '#ffffff';
+        wrapper.style.border = '1px solid rgba(148, 163, 184, 0.35)';
+        wrapper.style.borderRadius = '8px';
+        wrapper.style.padding = '12px 16px';
+        wrapper.style.display = 'flex';
+        wrapper.style.flexDirection = 'column';
+
+        if (el.title) {
+          const header = document.createElement('div');
+          header.textContent = el.title;
+          header.style.fontWeight = '700';
+          header.style.fontSize = '15px';
+          header.style.textAlign = 'center';
+          header.style.color = '#1e293b';
+          header.style.marginBottom = '8px';
+          wrapper.appendChild(header);
+        }
+
+        const ns = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(ns, 'svg');
+        const vbW = 600;
+        const vbH = 320;
+        svg.setAttribute('viewBox', `0 0 ${vbW} ${vbH}`);
+        svg.style.width = '100%';
+        svg.style.flex = '1';
+
+        const categories = el.series[0]?.categories || [];
+        const allVals = el.series.flatMap(s => s.values);
+        const maxVal = Math.max(1, ...allVals) * 1.12;
+
+        if (el.chartKind === 'pie') {
+          const vals = el.series[0]?.values || [];
+          const total = vals.reduce((a, b) => a + Math.max(0, b), 0) || 1;
+          const colors = ['#4f5bd5', '#e11d48', '#059669', '#d97706', '#0284c7', '#7c3aed'];
+          let startAngle = -Math.PI / 2;
+          const cx = 210, cy = 160, r = 115;
+
+          vals.forEach((v, idx) => {
+            const sliceAngle = (Math.max(0, v) / total) * Math.PI * 2;
+            const endAngle = startAngle + sliceAngle;
+            const x1 = cx + r * Math.cos(startAngle);
+            const y1 = cy + r * Math.sin(startAngle);
+            const x2 = cx + r * Math.cos(endAngle);
+            const y2 = cy + r * Math.sin(endAngle);
+            const largeArc = sliceAngle > Math.PI ? 1 : 0;
+
+            const path = document.createElementNS(ns, 'path');
+            path.setAttribute('d', `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`);
+            path.setAttribute('fill', colors[idx % colors.length]);
+            path.setAttribute('stroke', '#ffffff');
+            path.setAttribute('stroke-width', '2');
+            svg.appendChild(path);
+
+            // Legend item
+            const ly = 55 + idx * 26;
+            const rect = document.createElementNS(ns, 'rect');
+            rect.setAttribute('x', '365');
+            rect.setAttribute('y', String(ly - 10));
+            rect.setAttribute('width', '12');
+            rect.setAttribute('height', '12');
+            rect.setAttribute('rx', '3');
+            rect.setAttribute('fill', colors[idx % colors.length]);
+            svg.appendChild(rect);
+
+            const label = document.createElementNS(ns, 'text');
+            label.setAttribute('x', '385');
+            label.setAttribute('y', String(ly));
+            label.setAttribute('font-size', '12');
+            label.setAttribute('fill', '#334155');
+            const pct = Math.round((v / total) * 100);
+            label.textContent = `${categories[idx] || `Item ${idx + 1}`} (${pct}%)`;
+            svg.appendChild(label);
+
+            startAngle = endAngle;
+          });
+        } else {
+          // Bar / Column / Line Chart
+          const padL = 56, padR = 24, padT = 18, padB = 46;
+          const plotW = vbW - padL - padR;
+          const plotH = vbH - padT - padB;
+
+          // Horizontal Gridlines & Y labels
+          for (let step = 0; step <= 4; step++) {
+            const y = padT + plotH - (step / 4) * plotH;
+            const line = document.createElementNS(ns, 'line');
+            line.setAttribute('x1', String(padL));
+            line.setAttribute('y1', String(y));
+            line.setAttribute('x2', String(vbW - padR));
+            line.setAttribute('y2', String(y));
+            line.setAttribute('stroke', '#e2e8f0');
+            line.setAttribute('stroke-width', '1');
+            svg.appendChild(line);
+
+            const txt = document.createElementNS(ns, 'text');
+            txt.setAttribute('x', String(padL - 8));
+            txt.setAttribute('y', String(y + 4));
+            txt.setAttribute('text-anchor', 'end');
+            txt.setAttribute('font-size', '11');
+            txt.setAttribute('fill', '#64748b');
+            txt.textContent = String(Math.round((step / 4) * maxVal));
+            svg.appendChild(txt);
+          }
+
+          const numCats = Math.max(1, categories.length, ...el.series.map(s => s.values.length));
+          const groupW = plotW / numCats;
+
+          // X-axis labels
+          for (let c = 0; c < numCats; c++) {
+            const cx = padL + c * groupW + groupW / 2;
+            const txt = document.createElementNS(ns, 'text');
+            txt.setAttribute('x', String(cx));
+            txt.setAttribute('y', String(vbH - 22));
+            txt.setAttribute('text-anchor', 'middle');
+            txt.setAttribute('font-size', '11.5');
+            txt.setAttribute('fill', '#334155');
+            txt.textContent = categories[c] || `${c + 1}`;
+            svg.appendChild(txt);
+          }
+
+          if (el.chartKind === 'line') {
+            el.series.forEach(ser => {
+              const pts = ser.values.map((v, idx) => {
+                const px = padL + idx * groupW + groupW / 2;
+                const py = padT + plotH - (v / maxVal) * plotH;
+                return `${px},${py}`;
+              });
+              const poly = document.createElementNS(ns, 'polyline');
+              poly.setAttribute('points', pts.join(' '));
+              poly.setAttribute('fill', 'none');
+              poly.setAttribute('stroke', ser.color);
+              poly.setAttribute('stroke-width', '3');
+              svg.appendChild(poly);
+
+              ser.values.forEach((v, idx) => {
+                const px = padL + idx * groupW + groupW / 2;
+                const py = padT + plotH - (v / maxVal) * plotH;
+                const dot = document.createElementNS(ns, 'circle');
+                dot.setAttribute('cx', String(px));
+                dot.setAttribute('cy', String(py));
+                dot.setAttribute('r', '4.5');
+                dot.setAttribute('fill', ser.color);
+                svg.appendChild(dot);
+              });
+            });
+          } else {
+            const serCount = el.series.length;
+            const barW = Math.min(36, (groupW * 0.72) / serCount);
+            el.series.forEach((ser, sIdx) => {
+              ser.values.forEach((v, cIdx) => {
+                const barH = (Math.max(0, v) / maxVal) * plotH;
+                const bx = padL + cIdx * groupW + (groupW - barW * serCount) / 2 + sIdx * barW;
+                const by = padT + plotH - barH;
+                const rect = document.createElementNS(ns, 'rect');
+                rect.setAttribute('x', String(bx));
+                rect.setAttribute('y', String(by));
+                rect.setAttribute('width', String(Math.max(4, barW - 2)));
+                rect.setAttribute('height', String(barH));
+                rect.setAttribute('rx', '3');
+                rect.setAttribute('fill', ser.color);
+                svg.appendChild(rect);
+              });
+            });
+          }
+        }
+
+        wrapper.appendChild(svg);
+
+        // Legend for multi-series
+        if (el.chartKind !== 'pie' && el.series.length > 0) {
+          const legend = document.createElement('div');
+          legend.style.display = 'flex';
+          legend.style.justifyContent = 'center';
+          legend.style.gap = '16px';
+          legend.style.fontSize = '11.5px';
+          legend.style.color = '#475569';
+          for (const ser of el.series) {
+            const item = document.createElement('span');
+            item.style.display = 'inline-flex';
+            item.style.alignItems = 'center';
+            item.style.gap = '6px';
+            item.innerHTML = `<i style="width:10px;height:10px;border-radius:2px;background:${ser.color};display:inline-block;"></i>${DOMPurify.sanitize(ser.name)}`;
+            legend.appendChild(item);
+          }
+          wrapper.appendChild(legend);
+        }
+
+        return wrapper;
+      }
+    }
+
+    /* --------------------------------------------------------------------------
+       5. SYNTHETIC SAMPLE LECTURE .PPTX GENERATOR
+       Builds an authentic, standards-compliant OpenXML .pptx archive in memory
+       to verify parsing, Arabic RTL, Bidi, Tables, Charts, Gradients & Notes.
+       -------------------------------------------------------------------------- */
+    class SampleDeckGenerator {
+      static async generateBuffer() {
+        const zip = new JSZip();
+
+        zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+  <Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+  <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+  <Override PartName="/ppt/slides/slide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+  <Override PartName="/ppt/slides/slide3.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+  <Override PartName="/ppt/slides/slide4.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+  <Override PartName="/ppt/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>
+  <Override PartName="/ppt/notesSlides/notesSlide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>
+  <Override PartName="/ppt/notesSlides/notesSlide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>
+</Types>`);
+
+        zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>`);
+
+        zip.file('ppt/presentation.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:sldIdLst>
+    <p:sldId id="256" r:id="rId1"/>
+    <p:sldId id="257" r:id="rId2"/>
+    <p:sldId id="258" r:id="rId3"/>
+    <p:sldId id="259" r:id="rId4"/>
+  </p:sldIdLst>
+  <p:sldSz cx="12192000" cy="6858000" type="screen16x9"/>
+</p:presentation>`);
+
+        zip.file('ppt/_rels/presentation.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide3.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide4.xml"/>
+  <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>
+</Relationships>`);
+
+        zip.file('ppt/theme/theme1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="UniversityLectureTheme">
+  <a:themeElements>
+    <a:clrScheme name="Academic">
+      <a:dk1><a:srgbClr val="0F172A"/></a:dk1>
+      <a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>
+      <a:dk2><a:srgbClr val="1E293B"/></a:dk2>
+      <a:lt2><a:srgbClr val="F1F5F9"/></a:lt2>
+      <a:accent1><a:srgbClr val="4F5BD5"/></a:accent1>
+      <a:accent2><a:srgbClr val="0D9488"/></a:accent2>
+      <a:accent3><a:srgbClr val="D97706"/></a:accent3>
+      <a:accent4><a:srgbClr val="E11D48"/></a:accent4>
+      <a:accent5><a:srgbClr val="0284C7"/></a:accent5>
+      <a:accent6><a:srgbClr val="7C3AED"/></a:accent6>
+    </a:clrScheme>
+  </a:themeElements>
+</a:theme>`);
+
+        // Slide 1: Widescreen Title Slide with Gradient Background & Speaker Notes
+        zip.file('ppt/slides/slide1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld>
+    <p:bg>
+      <p:bgPr>
+        <a:gradFill>
+          <a:gsLst>
+            <a:gs pos="0"><a:srgbClr val="0F172A"/></a:gs>
+            <a:gs pos="100000"><a:srgbClr val="1E293B"/></a:gs>
+          </a:gsLst>
+          <a:lin ang="2700000"/>
+        </a:gradFill>
+      </p:bgPr>
+    </p:bg>
+    <p:spTree>
+      <p:sp>
+        <p:nvSpPr><p:cNvPr id="1" name="Badge"/><p:nvPr/></p:nvSpPr>
+        <p:spPr>
+          <a:xfrm><a:off x="914400" y="1143000"/><a:ext cx="3600000" cy="420000"/></a:xfrm>
+          <a:prstGeom prst="roundRect"/>
+          <a:solidFill><a:srgbClr val="4F5BD5"/></a:solidFill>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr anchor="ctr"/>
+          <a:p><a:pPr algn="ctr"/><a:r><a:rPr sz="1400" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:rPr><a:t>CS-402 • DISTRIBUTED SYSTEMS</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr><p:cNvPr id="2" name="Title"/><p:nvPr><p:ph type="ctrTitle"/></p:nvPr></p:nvSpPr>
+        <p:spPr><a:xfrm><a:off x="914400" y="1828800"/><a:ext cx="10363200" cy="1800000"/></a:xfrm></p:spPr>
+        <p:txBody>
+          <a:bodyPr/>
+          <a:p><a:r><a:rPr sz="4200" b="1"><a:solidFill><a:srgbClr val="F8FAFC"/></a:solidFill></a:rPr><a:t>Consensus Algorithms &amp; Fault Tolerance</a:t></a:r></a:p>
+          <a:p><a:pPr rtl="1" algn="r"/><a:r><a:rPr sz="2800" b="1"><a:solidFill><a:srgbClr val="93C5FD"/></a:solidFill></a:rPr><a:t>خوارزميات التوافق في الأنظمة الموزعة وتحمل الأعطال</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:nvSpPr><p:cNvPr id="3" name="FooterCard"/><p:nvPr/></p:nvSpPr>
+        <p:spPr>
+          <a:xfrm><a:off x="914400" y="4500000"/><a:ext cx="10363200" cy="1100000"/></a:xfrm>
+          <a:prstGeom prst="roundRect"/>
+          <a:solidFill><a:srgbClr val="1E293B"/></a:solidFill>
+          <a:ln w="19050"><a:solidFill><a:srgbClr val="334155"/></a:solidFill></a:ln>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr anchor="ctr" lIns="200000"/>
+          <a:p><a:r><a:rPr sz="1600"><a:solidFill><a:srgbClr val="CBD5E1"/></a:solidFill></a:rPr><a:t>Interactive Lecture Deck • Press Space / ArrowRight to advance, F for Fullscreen, or open Notes below.</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>`);
+
+        zip.file('ppt/slides/_rels/slide1.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide1.xml"/>
+</Relationships>`);
+
+        zip.file('ppt/notesSlides/notesSlide1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld><p:spTree><p:sp><p:txBody>
+    <a:p><a:r><a:t>Instructor Note: Welcome students to Lecture 7. Emphasize how Raft decomposes consensus into Leader Election, Log Replication, and Safety.</a:t></a:r></a:p>
+    <a:p><a:r><a:t>ملاحظة المحاضر: التركيز على الفرق بين التناسق القوي (Strong Consistency) والتوافر العالي حسب نظرية CAP.</a:t></a:r></a:p>
+  </p:txBody></p:sp></p:spTree></p:cSld>
+</p:notes>`);
+
+        // Slide 2: Bilingual Arabic RTL + English Comparison Table
+        zip.file('ppt/slides/slide2.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld>
+    <p:spTree>
+      <p:sp>
+        <p:nvSpPr><p:cNvPr id="1" name="Header"/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+        <p:spPr><a:xfrm><a:off x="685800" y="457200"/><a:ext cx="10820400" cy="762000"/></a:xfrm></p:spPr>
+        <p:txBody>
+          <a:p><a:r><a:rPr sz="2800" b="1"><a:solidFill><a:srgbClr val="0F172A"/></a:solidFill></a:rPr><a:t>Protocol Comparison: Raft vs. Paxos vs. PBFT</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+      <p:graphicFrame>
+        <p:xfrm><a:off x="685800" y="1400000"/><a:ext cx="10820400" cy="3400000"/></p:xfrm>
+        <a:graphic>
+          <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">
+            <a:tbl>
+              <a:tblGrid>
+                <a:gridCol w="2705100"/><a:gridCol w="2705100"/><a:gridCol w="2705100"/><a:gridCol w="2705100"/>
+              </a:tblGrid>
+              <a:tr h="680000">
+                <a:tc><a:txBody><a:p><a:r><a:rPr sz="1600"/><a:t>Protocol</a:t></a:r></a:p></a:txBody></a:tc>
+                <a:tc><a:txBody><a:p><a:r><a:rPr sz="1600"/><a:t>Fault Model</a:t></a:r></a:p></a:txBody></a:tc>
+                <a:tc><a:txBody><a:p><a:r><a:rPr sz="1600"/><a:t>Quorum Size</a:t></a:r></a:p></a:txBody></a:tc>
+                <a:tc><a:txBody><a:p><a:pPr rtl="1" algn="r"/><a:r><a:rPr sz="1600"/><a:t>الاستخدام العملي</a:t></a:r></a:p></a:txBody></a:tc>
+              </a:tr>
+              <a:tr h="680000">
+                <a:tc><a:txBody><a:p><a:r><a:rPr sz="1500" b="1"/><a:t>Raft</a:t></a:r></a:p></a:txBody></a:tc>
+                <a:tc><a:txBody><a:p><a:r><a:rPr sz="1500"/><a:t>Crash-Recovery (CFT)</a:t></a:r></a:p></a:txBody></a:tc>
+                <a:tc><a:txBody><a:p><a:r><a:rPr sz="1500"/><a:t>2f + 1 nodes</a:t></a:r></a:p></a:txBody></a:tc>
+                <a:tc><a:txBody><a:p><a:pPr rtl="1" algn="r"/><a:r><a:rPr sz="1500"/><a:t>etcd, Consul, CockroachDB</a:t></a:r></a:p></a:txBody></a:tc>
+              </a:tr>
+              <a:tr h="680000">
+                <a:tc><a:txBody><a:p><a:r><a:rPr sz="1500" b="1"/><a:t>Multi-Paxos</a:t></a:r></a:p></a:txBody></a:tc>
+                <a:tc><a:txBody><a:p><a:r><a:rPr sz="1500"/><a:t>Crash-Recovery (CFT)</a:t></a:r></a:p></a:txBody></a:tc>
+                <a:tc><a:txBody><a:p><a:r><a:rPr sz="1500"/><a:t>2f + 1 nodes</a:t></a:r></a:p></a:txBody></a:tc>
+                <a:tc><a:txBody><a:p><a:pPr rtl="1" algn="r"/><a:r><a:rPr sz="1500"/><a:t>Google Spanner, Chubby</a:t></a:r></a:p></a:txBody></a:tc>
+              </a:tr>
+              <a:tr h="680000">
+                <a:tc><a:txBody><a:p><a:r><a:rPr sz="1500" b="1"/><a:t>PBFT</a:t></a:r></a:p></a:txBody></a:tc>
+                <a:tc><a:txBody><a:p><a:r><a:rPr sz="1500"/><a:t>Byzantine (BFT)</a:t></a:r></a:p></a:txBody></a:tc>
+                <a:tc><a:txBody><a:p><a:r><a:rPr sz="1500"/><a:t>3f + 1 nodes</a:t></a:r></a:p></a:txBody></a:tc>
+                <a:tc><a:txBody><a:p><a:pPr rtl="1" algn="r"/><a:r><a:rPr sz="1500"/><a:t>الشبكات المالية والبلوكتشين</a:t></a:r></a:p></a:txBody></a:tc>
+              </a:tr>
+            </a:tbl>
+          </a:graphicData>
+        </a:graphic>
+      </p:graphicFrame>
+      <p:sp>
+        <p:spPr>
+          <a:xfrm><a:off x="685800" y="5100000"/><a:ext cx="10820400" cy="1100000"/></a:xfrm>
+          <a:prstGeom prst="roundRect"/>
+          <a:solidFill><a:srgbClr val="EEF2FF"/></a:solidFill>
+          <a:ln w="12700"><a:solidFill><a:srgbClr val="4F5BD5"/></a:solidFill></a:ln>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr anchor="ctr" lIns="180000" rIns="180000"/>
+          <a:p><a:pPr rtl="1" algn="r"/><a:r><a:rPr sz="1600" b="1"><a:srgbClr val="1E1B4B"/></a:rPr><a:t>قاعدة أساسية: لتحمل عدد (f) من العقد المتعطلة في نموذج CFT نحتاج إلى (2f + 1) من العقد لضمان تقاطع الأغلبية.</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>`);
+
+        zip.file('ppt/slides/_rels/slide2.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide2.xml"/>
+</Relationships>`);
+
+        zip.file('ppt/notesSlides/notesSlide2.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld><p:spTree><p:sp><p:txBody>
+    <a:p><a:r><a:t>Exam Question Hint: Be able to prove why Byzantine fault tolerance requires 3f + 1 replicas instead of 2f + 1 when f nodes may lie or equivocate.</a:t></a:r></a:p>
+  </p:txBody></p:sp></p:spTree></p:cSld>
+</p:notes>`);
+
+        // Slide 3: Native OpenXML Chart Slide
+        zip.file('ppt/slides/slide3.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld>
+    <p:spTree>
+      <p:sp>
+        <p:nvSpPr><p:cNvPr id="1" name="Title"/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+        <p:spPr><a:xfrm><a:off x="685800" y="457200"/><a:ext cx="10820400" cy="762000"/></a:xfrm></p:spPr>
+        <p:txBody>
+          <a:p><a:r><a:rPr sz="2800" b="1"><a:solidFill><a:srgbClr val="0F172A"/></a:solidFill></a:rPr><a:t>Replication Latency Benchmark (ms)</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+      <p:graphicFrame>
+        <p:xfrm><a:off x="685800" y="1350000"/><a:ext cx="7000000" cy="4800000"/></p:xfrm>
+        <a:graphic>
+          <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
+            <c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" r:id="rIdChart1"/>
+          </a:graphicData>
+        </a:graphic>
+      </p:graphicFrame>
+      <p:sp>
+        <p:spPr>
+          <a:xfrm><a:off x="8000000" y="1350000"/><a:ext cx="3500000" cy="4800000"/></a:xfrm>
+          <a:prstGeom prst="roundRect"/>
+          <a:solidFill><a:srgbClr val="F8FAFC"/></a:solidFill>
+          <a:ln w="12700"><a:solidFill><a:srgbClr val="CBD5E1"/></a:solidFill></a:ln>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr lIns="180000" rIns="180000" tIns="180000"/>
+          <a:p><a:r><a:rPr sz="1800" b="1"><a:srgbClr val="0F172A"/></a:rPr><a:t>Key Observations</a:t></a:r></a:p>
+          <a:p><a:pPr><a:buChar char="•"/></a:pPr><a:r><a:rPr sz="1500"><a:srgbClr val="334155"/></a:rPr><a:t>3-node clusters achieve sub-12ms p99 commit latency.</a:t></a:r></a:p>
+          <a:p><a:pPr><a:buChar char="•"/></a:pPr><a:r><a:rPr sz="1500"><a:srgbClr val="334155"/></a:rPr><a:t>Batching and pipelining reduce leader CPU overhead by 44%.</a:t></a:r></a:p>
+          <a:p><a:pPr rtl="1" algn="r"/><a:r><a:rPr sz="1500" b="1"><a:srgbClr val="4F5BD5"/></a:rPr><a:t>زمن الاستجابة يزداد خطياً مع اتساع التوزيع الجغرافي للعقد.</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>`);
+
+        zip.file('ppt/slides/_rels/slide3.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdChart1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/>
+</Relationships>`);
+
+        zip.file('ppt/charts/chart1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
+  <c:chart>
+    <c:title><c:tx><c:rich><a:p xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:r><a:t>p50 vs p99 Commit Latency (ms)</a:t></a:r></a:p></c:rich></c:tx></c:title>
+    <c:plotArea>
+      <c:barChart>
+        <c:barDir val="col"/>
+        <c:ser>
+          <c:tx><c:v>p50 Median</c:v></c:tx>
+          <c:cat><c:strCache><c:pt><c:v>3 Nodes</c:v></c:pt><c:pt><c:v>5 Nodes</c:v></c:pt><c:pt><c:v>7 Nodes</c:v></c:pt><c:pt><c:v>Multi-Region</c:v></c:pt></c:strCache></c:cat>
+          <c:val><c:numCache><c:pt><c:v>4</c:v></c:pt><c:pt><c:v>7</c:v></c:pt><c:pt><c:v>11</c:v></c:pt><c:pt><c:v>38</c:v></c:pt></c:numCache></c:val>
+        </c:ser>
+        <c:ser>
+          <c:tx><c:v>p99 Tail</c:v></c:tx>
+          <c:cat><c:strCache><c:pt><c:v>3 Nodes</c:v></c:pt><c:pt><c:v>5 Nodes</c:v></c:pt><c:pt><c:v>7 Nodes</c:v></c:pt><c:pt><c:v>Multi-Region</c:v></c:pt></c:strCache></c:cat>
+          <c:val><c:numCache><c:pt><c:v>11</c:v></c:pt><c:pt><c:v>18</c:v></c:pt><c:pt><c:v>27</c:v></c:pt><c:pt><c:v>74</c:v></c:pt></c:numCache></c:val>
+        </c:ser>
+      </c:barChart>
+    </c:plotArea>
+  </c:chart>
+</c:chartSpace>`);
+
+        // Slide 4: Vector Shapes, Flow Diagram & Pure Arabic RTL Slide
+        zip.file('ppt/slides/slide4.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld>
+    <p:spTree>
+      <p:sp>
+        <p:nvSpPr><p:cNvPr id="1" name="ArabicTitle"/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+        <p:spPr><a:xfrm><a:off x="685800" y="457200"/><a:ext cx="10820400" cy="762000"/></a:xfrm></p:spPr>
+        <p:txBody>
+          <a:p><a:pPr rtl="1" algn="r"/><a:r><a:rPr sz="3000" b="1"><a:solidFill><a:srgbClr val="0F172A"/></a:solidFill></a:rPr><a:t>دورة حياة انتخاب القائد في خوارزمية Raft</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:spPr>
+          <a:xfrm><a:off x="1000000" y="2100000"/><a:ext cx="2600000" cy="1400000"/></a:xfrm>
+          <a:prstGeom prst="roundRect"/>
+          <a:solidFill><a:srgbClr val="0D9488"/></a:solidFill>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr anchor="ctr"/>
+          <a:p><a:pPr rtl="1" algn="ctr"/><a:r><a:rPr sz="2000" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:rPr><a:t>1. تابع (Follower)</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:spPr>
+          <a:xfrm><a:off x="3850000" y="2550000"/><a:ext cx="700000" cy="500000"/></a:xfrm>
+          <a:prstGeom prst="rightArrow"/>
+          <a:solidFill><a:srgbClr val="64748B"/></a:solidFill>
+        </p:spPr>
+      </p:sp>
+      <p:sp>
+        <p:spPr>
+          <a:xfrm><a:off x="4800000" y="2100000"/><a:ext cx="2600000" cy="1400000"/></a:xfrm>
+          <a:prstGeom prst="roundRect"/>
+          <a:solidFill><a:srgbClr val="D97706"/></a:solidFill>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr anchor="ctr"/>
+          <a:p><a:pPr rtl="1" algn="ctr"/><a:r><a:rPr sz="2000" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:rPr><a:t>2. مرشح (Candidate)</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:spPr>
+          <a:xfrm><a:off x="7650000" y="2550000"/><a:ext cx="700000" cy="500000"/></a:xfrm>
+          <a:prstGeom prst="rightArrow"/>
+          <a:solidFill><a:srgbClr val="64748B"/></a:solidFill>
+        </p:spPr>
+      </p:sp>
+      <p:sp>
+        <p:spPr>
+          <a:xfrm><a:off x="8600000" y="2100000"/><a:ext cx="2600000" cy="1400000"/></a:xfrm>
+          <a:prstGeom prst="roundRect"/>
+          <a:solidFill><a:srgbClr val="4F5BD5"/></a:solidFill>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr anchor="ctr"/>
+          <a:p><a:pPr rtl="1" algn="ctr"/><a:r><a:rPr sz="2000" b="1"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:rPr><a:t>3. قائد (Leader)</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+      <p:sp>
+        <p:spPr>
+          <a:xfrm><a:off x="1000000" y="4200000"/><a:ext cx="10200000" cy="1600000"/></a:xfrm>
+          <a:prstGeom prst="rect"/>
+          <a:solidFill><a:srgbClr val="F1F5F9"/></a:solidFill>
+        </p:spPr>
+        <p:txBody>
+          <a:bodyPr anchor="ctr" lIns="200000" rIns="200000"/>
+          <a:p><a:pPr rtl="1" algn="r"/><a:r><a:rPr sz="1700"><a:srgbClr val="1E293B"/></a:rPr><a:t>عند انتهاء مهلة الانتخاب (Election Timeout) دون استلام نبضة قلب (Heartbeat) من القائد الحالي، يقوم التابع بزيادة رقم الفترة (Term) وطلب الأصوات من بقية العقد.</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>`);
+
+        return zip.generateAsync({ type: 'arraybuffer' });
+      }
+    }
+
+    /* --------------------------------------------------------------------------
+       6. VIEWER CONTROLLER & APPLICATION STATE
+       -------------------------------------------------------------------------- */
+    /**
+     * Keeps open .pptx files in IndexedDB so tabs survive a page reload.
+     * Everything stays local in this browser.
+     */
+    class SessionStore {
+      constructor() {
+        this.dbPromise = null;
+      }
+
+      open() {
+        if (!this.dbPromise) {
+          this.dbPromise = new Promise((resolve, reject) => {
+            if (!window.indexedDB) return reject(new Error('IndexedDB unavailable'));
+            const req = indexedDB.open('deckstudio', 1);
+            req.onupgradeneeded = () => {
+              if (!req.result.objectStoreNames.contains('openDecks')) {
+                req.result.createObjectStore('openDecks', { keyPath: 'key' });
+              }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+          });
+          this.dbPromise.catch(() => { this.dbPromise = null; });
+        }
+        return this.dbPromise;
+      }
+
+      async run(mode, fn) {
+        const db = await this.open();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction('openDecks', mode);
+          const req = fn(tx.objectStore('openDecks'));
+          tx.oncomplete = () => resolve(req?.result);
+          tx.onerror = () => reject(tx.error);
+          tx.onabort = () => reject(tx.error);
+        });
+      }
+
+      getAll() { return this.run('readonly', s => s.getAll()); }
+      put(record) { return this.run('readwrite', s => s.put(record)); }
+      delete(key) { return this.run('readwrite', s => s.delete(key)); }
+    }
+
+    class ViewerController {
+      constructor() {
+        this.decks = [];
+        this.activeDeckId = null;
+        this.currentSlideIndex = 0; // 0-based
+        this.sidebarMode = 'thumbnails'; // 'thumbnails' | 'outline'
+        this.zoomMode = 'fit'; // 'fit' | 'width' | 'manual'
+        this.zoomScale = 1;
+        this.pan = { x: 0, y: 0 };
+        this.isPanning = false;
+        this.panStart = { x: 0, y: 0 };
+        this.recentFiles = []; // { name, buffer }
+        this.thumbObserver = null;
+        this.store = new SessionStore();
+
+        this.cacheDom();
+        this.bindEvents();
+        this.initTheme();
+        this.restoreSession();
+      }
+
+      /* ---------------- Session persistence (survives page reload) ---------------- */
+      readSessionMeta() {
+        try {
+          return JSON.parse(localStorage.getItem('deckstudio-session') || '{}') || {};
+        } catch {
+          return {};
+        }
+      }
+
+      saveSessionMeta() {
+        try {
+          const meta = this.readSessionMeta();
+          meta.slides = meta.slides || {};
+          const deck = this.activeDeck;
+          meta.activeKey = deck?.storeKey || null;
+          if (deck?.storeKey) meta.slides[deck.storeKey] = this.currentSlideIndex;
+          // Forget positions of decks that are no longer open
+          const open = new Set(this.decks.map(d => d.storeKey));
+          for (const k of Object.keys(meta.slides)) if (!open.has(k)) delete meta.slides[k];
+          localStorage.setItem('deckstudio-session', JSON.stringify(meta));
+        } catch {
+          // Storage unavailable — persistence is best-effort
+        }
+      }
+
+      async restoreSession() {
+        let records = [];
+        try {
+          records = await this.store.getAll();
+        } catch {
+          return;
+        }
+        if (records.length === 0) return;
+
+        const meta = this.readSessionMeta();
+        records.sort((a, b) => a.order - b.order);
+        this.restoring = true;
+        try {
+          for (const rec of records) {
+            try {
+              this.setLoading(true, 5, `Restoring ${rec.name}…`);
+              await this.openBuffer(rec.buffer, rec.name, { storeKey: rec.key, persist: false });
+            } catch {
+              this.store.delete(rec.key).catch(() => {});
+            }
+          }
+        } finally {
+          this.restoring = false;
+          this.setLoading(false);
+        }
+
+        const target = this.decks.find(d => d.storeKey === meta.activeKey) || this.decks[this.decks.length - 1];
+        if (target) {
+          this.switchDeck(target.id);
+          const idx = Number(meta.slides?.[target.storeKey] || 0);
+          if (idx > 0) this.goToSlide(idx);
+        }
+      }
+
+      cacheDom() {
+        this.dom = {
+          app: document.getElementById('app'),
+          loadingBar: document.getElementById('loading-bar'),
+          loadingFill: document.getElementById('loading-fill'),
+          loadingText: document.getElementById('loading-text'),
+          tabsBar: document.getElementById('tabs-bar'),
+          sidebar: document.getElementById('sidebar'),
+          sidebarContent: document.getElementById('sidebar-content'),
+          tabThumbnails: document.getElementById('tab-thumbnails'),
+          tabOutline: document.getElementById('tab-outline'),
+          viewport: document.getElementById('viewport'),
+          emptyState: document.getElementById('empty-state'),
+          recentContainer: document.getElementById('recent-container'),
+          recentList: document.getElementById('recent-list'),
+          stageWrapper: document.getElementById('slide-stage-wrapper'),
+          slideSurface: document.getElementById('slide-surface'),
+          notesDrawer: document.getElementById('notes-drawer'),
+          notesBody: document.getElementById('notes-body'),
+          zoomReadout: document.getElementById('zoom-readout'),
+          slideJumpInput: document.getElementById('slide-jump-input'),
+          totalSlidesLabel: document.getElementById('total-slides-label'),
+          aspectBadge: document.getElementById('aspect-badge'),
+          fileInput: document.getElementById('file-input'),
+          dropOverlay: document.getElementById('drop-overlay'),
+          searchModal: document.getElementById('search-modal'),
+          searchInput: document.getElementById('search-input'),
+          searchResults: document.getElementById('search-results'),
+          shortcutsModal: document.getElementById('shortcuts-modal'),
+          toastStack: document.getElementById('toast-stack'),
+          deckControls: [
+            'btn-zoom-out', 'btn-zoom-in', 'btn-fit-screen', 'btn-fit-width',
+            'btn-search', 'btn-toggle-notes', 'btn-study-mode', 'btn-export-png',
+            'btn-download-pptx', 'btn-fullscreen', 'btn-prev', 'btn-next', 'slide-jump-input'
+          ].map(id => document.getElementById(id))
+        };
+      }
+
+      bindEvents() {
+        // File opening triggers
+        document.getElementById('btn-open-file').addEventListener('click', () => this.dom.fileInput.click());
+        document.getElementById('btn-empty-open').addEventListener('click', () => this.dom.fileInput.click());
+        this.dom.fileInput.addEventListener('change', (e) => {
+          if (e.target.files?.length) this.handleFiles(Array.from(e.target.files));
+          e.target.value = '';
+        });
+
+        // Sample Lecture triggers
+        const loadSample = () => this.loadSampleLecture();
+        document.getElementById('btn-load-sample').addEventListener('click', loadSample);
+        document.getElementById('btn-empty-sample').addEventListener('click', loadSample);
+
+        // Drag & Drop
+        let dragCounter = 0;
+        window.addEventListener('dragenter', (e) => {
+          e.preventDefault();
+          dragCounter++;
+          this.dom.dropOverlay.classList.add('visible');
+        });
+        window.addEventListener('dragleave', (e) => {
+          e.preventDefault();
+          dragCounter--;
+          if (dragCounter <= 0) {
+            dragCounter = 0;
+            this.dom.dropOverlay.classList.remove('visible');
+          }
+        });
+        window.addEventListener('dragover', (e) => e.preventDefault());
+        window.addEventListener('drop', (e) => {
+          e.preventDefault();
+          dragCounter = 0;
+          this.dom.dropOverlay.classList.remove('visible');
+          const files = Array.from(e.dataTransfer?.files || []);
+          if (files.length) this.handleFiles(files);
+        });
+
+        // Navigation
+        document.getElementById('btn-prev').addEventListener('click', () => this.prevSlide());
+        document.getElementById('btn-next').addEventListener('click', () => this.nextSlide());
+        this.dom.slideJumpInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            const val = parseInt(this.dom.slideJumpInput.value, 10);
+            if (!Number.isNaN(val)) this.goToSlide(val - 1);
+            this.dom.slideJumpInput.blur();
+          }
+        });
+
+        // Sidebar controls
+        document.getElementById('btn-toggle-sidebar').addEventListener('click', () => {
+          this.dom.sidebar.classList.toggle('collapsed');
+          setTimeout(() => this.applyZoomLayout(), 230);
+        });
+        this.dom.tabThumbnails.addEventListener('click', () => this.setSidebarMode('thumbnails'));
+        this.dom.tabOutline.addEventListener('click', () => this.setSidebarMode('outline'));
+
+        // Zoom & Pan controls
+        document.getElementById('btn-zoom-in').addEventListener('click', () => this.adjustZoom(0.15));
+        document.getElementById('btn-zoom-out').addEventListener('click', () => this.adjustZoom(-0.15));
+        document.getElementById('btn-fit-screen').addEventListener('click', () => {
+          this.zoomMode = 'fit';
+          this.pan = { x: 0, y: 0 };
+          this.applyZoomLayout();
+        });
+        document.getElementById('btn-fit-width').addEventListener('click', () => {
+          this.zoomMode = 'width';
+          this.pan = { x: 0, y: 0 };
+          this.applyZoomLayout();
+        });
+
+        // Ctrl + Wheel zoom & Drag-to-Pan when zoomed
+        this.dom.viewport.addEventListener('wheel', (e) => {
+          if (!this.activeDeck) return;
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            this.adjustZoom(e.deltaY < 0 ? 0.1 : -0.1);
+          }
+        }, { passive: false });
+
+        this.dom.viewport.addEventListener('mousedown', (e) => {
+          if (!this.activeDeck || this.zoomMode === 'fit') return;
+          if (e.button !== 0) return;
+          this.isPanning = true;
+          this.panStart = { x: e.clientX - this.pan.x, y: e.clientY - this.pan.y };
+          this.dom.viewport.classList.add('panning');
+        });
+        window.addEventListener('mousemove', (e) => {
+          if (!this.isPanning) return;
+          this.pan.x = e.clientX - this.panStart.x;
+          this.pan.y = e.clientY - this.panStart.y;
+          this.updateStageTransform();
+        });
+        window.addEventListener('mouseup', () => {
+          if (!this.isPanning) return;
+          this.isPanning = false;
+          this.dom.viewport.classList.remove('panning');
+        });
+
+        // Touch Swipe for mobile slide navigation
+        let touchStartX = 0;
+        this.dom.viewport.addEventListener('touchstart', (e) => {
+          if (e.touches.length === 1) touchStartX = e.touches[0].clientX;
+        }, { passive: true });
+        this.dom.viewport.addEventListener('touchend', (e) => {
+          if (!this.activeDeck || this.zoomMode !== 'fit') return;
+          const dx = e.changedTouches[0].clientX - touchStartX;
+          if (Math.abs(dx) > 55) {
+            if (dx < 0) this.nextSlide();
+            else this.prevSlide();
+          }
+        }, { passive: true });
+
+        // Notes, Study Mode, Theme, Fullscreen
+        document.getElementById('btn-toggle-notes').addEventListener('click', () => {
+          this.dom.notesDrawer.classList.toggle('hidden');
+          document.getElementById('btn-toggle-notes').classList.toggle('active', !this.dom.notesDrawer.classList.contains('hidden'));
+          this.applyZoomLayout();
+        });
+        document.getElementById('btn-close-notes').addEventListener('click', () => {
+          this.dom.notesDrawer.classList.add('hidden');
+          document.getElementById('btn-toggle-notes').classList.remove('active');
+          this.applyZoomLayout();
+        });
+
+        document.getElementById('btn-study-mode').addEventListener('click', () => this.toggleStudyMode(true));
+        document.getElementById('study-exit-pill').addEventListener('click', () => this.toggleStudyMode(false));
+
+        document.getElementById('btn-theme').addEventListener('click', () => this.toggleTheme());
+        document.getElementById('btn-fullscreen').addEventListener('click', () => this.toggleFullscreen());
+
+        // Export PNG & Download PPTX
+        document.getElementById('btn-export-png').addEventListener('click', () => this.exportCurrentSlidePng());
+        document.getElementById('btn-download-pptx').addEventListener('click', () => this.downloadOriginalPptx());
+
+        // Search & Shortcuts Modals
+        document.getElementById('btn-search').addEventListener('click', () => this.openSearchModal());
+        this.dom.searchModal.addEventListener('click', (e) => {
+          if (e.target === this.dom.searchModal) this.closeModals();
+        });
+        this.dom.searchInput.addEventListener('input', debounce(() => this.runSearch(), 140));
+
+        document.getElementById('btn-shortcuts').addEventListener('click', () => this.openShortcutsModal());
+        document.getElementById('btn-close-shortcuts').addEventListener('click', () => this.closeModals());
+        this.dom.shortcutsModal.addEventListener('click', (e) => {
+          if (e.target === this.dom.shortcutsModal) this.closeModals();
+        });
+
+        // Window resize debounce
+        window.addEventListener('resize', debounce(() => this.applyZoomLayout(), 90));
+
+        // Global Keyboard Shortcuts
+        window.addEventListener('keydown', (e) => this.handleKeydown(e));
+      }
+
+      get activeDeck() {
+        return this.decks.find(d => d.id === this.activeDeckId) || null;
+      }
+
+      initTheme() {
+        const saved = localStorage.getItem('deckstudio-theme');
+        if (saved === 'light' || saved === 'dark') {
+          document.documentElement.setAttribute('data-theme', saved);
+        }
+      }
+
+      toggleTheme() {
+        const cur = document.documentElement.getAttribute('data-theme');
+        const next = cur === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('deckstudio-theme', next);
+      }
+
+      setLoading(active, pct = 0, label = '') {
+        this.dom.loadingBar.classList.toggle('active', active);
+        this.dom.loadingFill.style.width = `${pct}%`;
+        if (label) this.dom.loadingText.textContent = label;
+      }
+
+      toast(message, type = 'info') {
+        const el = document.createElement('div');
+        el.className = `toast ${type}`;
+        el.innerHTML = `<span>${DOMPurify.sanitize(message)}</span><button style="color:var(--text-muted);font-weight:700;">✕</button>`;
+        el.querySelector('button').addEventListener('click', () => el.remove());
+        this.dom.toastStack.appendChild(el);
+        setTimeout(() => el.remove(), 5200);
+      }
+
+      async handleFiles(files) {
+        for (const file of files) {
+          if (!file.name.toLowerCase().endsWith('.pptx')) {
+            this.toast(`Skipped "${file.name}": Only .pptx files are supported.`, 'error');
+            continue;
+          }
+          try {
+            this.setLoading(true, 5, `Loading ${file.name}…`);
+            const buffer = await file.arrayBuffer();
+            await this.openBuffer(buffer, file.name);
+          } catch (err) {
+            this.toast(`Failed to open "${file.name}": ${err.message}`, 'error');
+          } finally {
+            this.setLoading(false);
+          }
+        }
+      }
+
+      async loadSampleLecture() {
+        try {
+          this.setLoading(true, 15, 'Generating multilingual sample lecture…');
+          const buffer = await SampleDeckGenerator.generateBuffer();
+          await this.openBuffer(buffer, 'CS402_Distributed_Systems_Sample.pptx');
+          this.toast('Loaded sample lecture with English, Arabic RTL, Table & Chart.', 'success');
+        } catch (err) {
+          this.toast(`Sample error: ${err.message}`, 'error');
+        } finally {
+          this.setLoading(false);
+        }
+      }
+
+      async openBuffer(arrayBuffer, fileName, { storeKey = null, persist = true } = {}) {
+        const parser = new OpenXMLParser((pct, msg) => this.setLoading(true, pct, msg));
+        const deck = await parser.parse(arrayBuffer, fileName);
+        deck.storeKey = storeKey || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+        this.decks.push(deck);
+        this.recordRecent(fileName, arrayBuffer);
+
+        if (persist) {
+          try {
+            await this.store.put({ key: deck.storeKey, name: fileName, buffer: arrayBuffer, order: Date.now() });
+          } catch {
+            this.toast(`"${fileName}" is open but couldn't be saved for the next reload (browser storage unavailable or full).`, 'error');
+          }
+        }
+
+        // While restoring, only the final active deck gets rendered
+        if (!this.restoring) this.switchDeck(deck.id);
+      }
+
+      recordRecent(name, buffer) {
+        this.recentFiles = [{ name, buffer }, ...this.recentFiles.filter(r => r.name !== name)].slice(0, 5);
+        this.renderRecentList();
+      }
+
+      renderRecentList() {
+        if (this.recentFiles.length === 0) {
+          this.dom.recentContainer.style.display = 'none';
+          return;
+        }
+        this.dom.recentContainer.style.display = 'block';
+        this.dom.recentList.innerHTML = '';
+        for (const item of this.recentFiles) {
+          const row = document.createElement('div');
+          row.className = 'recent-item';
+          row.innerHTML = `<span>📄 ${DOMPurify.sanitize(item.name)}</span><span style="font-size:11px;color:var(--accent);">Open</span>`;
+          row.addEventListener('click', () => this.openBuffer(item.buffer, item.name));
+          this.dom.recentList.appendChild(row);
+        }
+      }
+
+      switchDeck(deckId) {
+        this.activeDeckId = deckId;
+        this.currentSlideIndex = 0;
+        this.zoomMode = 'fit';
+        this.pan = { x: 0, y: 0 };
+
+        this.renderTabs();
+        this.updateControlsAvailability();
+
+        if (!this.activeDeck) {
+          this.dom.emptyState.style.display = 'block';
+          this.dom.stageWrapper.style.display = 'none';
+          this.dom.sidebarContent.innerHTML = `<div style="padding:24px 12px;text-align:center;font-size:12px;color:var(--text-muted);">Open a presentation to view slides</div>`;
+          this.dom.totalSlidesLabel.textContent = '0';
+          this.dom.slideJumpInput.value = '0';
+          this.dom.aspectBadge.textContent = 'No Deck Loaded';
+          return;
+        }
+
+        this.dom.emptyState.style.display = 'none';
+        this.dom.stageWrapper.style.display = 'block';
+        this.dom.aspectBadge.textContent = this.activeDeck.aspectLabel;
+        this.dom.totalSlidesLabel.textContent = String(this.activeDeck.slides.length);
+
+        this.renderSidebar();
+        this.goToSlide(0);
+      }
+
+      closeDeck(deckId, e) {
+        if (e) e.stopPropagation();
+        const idx = this.decks.findIndex(d => d.id === deckId);
+        if (idx === -1) return;
+
+        // Clean up Blob URLs to avoid memory leaks
+        const [removed] = this.decks.splice(idx, 1);
+        for (const url of removed.blobUrls || []) {
+          URL.revokeObjectURL(url);
+        }
+        if (removed.storeKey) this.store.delete(removed.storeKey).catch(() => {});
+
+        if (this.activeDeckId === deckId) {
+          const nextDeck = this.decks[idx] || this.decks[idx - 1] || null;
+          this.switchDeck(nextDeck ? nextDeck.id : null);
+        } else {
+          this.renderTabs();
+        }
+      }
+
+      renderTabs() {
+        this.dom.tabsBar.innerHTML = '';
+        for (const deck of this.decks) {
+          const tab = document.createElement('div');
+          tab.className = `deck-tab ${deck.id === this.activeDeckId ? 'active' : ''}`;
+          tab.title = deck.name;
+          tab.innerHTML = `
+            <span class="deck-tab-title">${DOMPurify.sanitize(deck.name)}</span>
+            <span class="deck-tab-count">${deck.slides.length}</span>
+            <button class="deck-tab-close" title="Close presentation">×</button>
+          `;
+          tab.addEventListener('click', () => this.switchDeck(deck.id));
+          tab.querySelector('.deck-tab-close').addEventListener('click', (e) => this.closeDeck(deck.id, e));
+          this.dom.tabsBar.appendChild(tab);
+        }
+      }
+
+      updateControlsAvailability() {
+        const hasDeck = Boolean(this.activeDeck);
+        for (const el of this.dom.deckControls) {
+          if (el) el.disabled = !hasDeck;
+        }
+      }
+
+      setSidebarMode(mode) {
+        this.sidebarMode = mode;
+        this.dom.tabThumbnails.classList.toggle('active', mode === 'thumbnails');
+        this.dom.tabOutline.classList.toggle('active', mode === 'outline');
+        this.renderSidebar();
+      }
+
+      renderSidebar() {
+        const deck = this.activeDeck;
+        if (!deck) return;
+
+        if (this.thumbObserver) {
+          this.thumbObserver.disconnect();
+          this.thumbObserver = null;
+        }
+
+        this.dom.sidebarContent.innerHTML = '';
+
+        if (this.sidebarMode === 'outline') {
+          deck.slides.forEach((slide, idx) => {
+            const item = document.createElement('div');
+            item.className = `outline-item ${idx === this.currentSlideIndex ? 'active' : ''}`;
+            item.dataset.idx = String(idx);
+            item.dir = containsArabic(slide.title) ? 'rtl' : 'ltr';
+            item.innerHTML = `
+              <span class="outline-num">${idx + 1}.</span>
+              <span class="outline-title">${DOMPurify.sanitize(slide.title)}</span>
+            `;
+            item.addEventListener('click', () => this.goToSlide(idx));
+            this.dom.sidebarContent.appendChild(item);
+          });
+          return;
+        }
+
+        // Lazy Virtualized Thumbnails via IntersectionObserver
+        const aspect = deck.width / deck.height;
+        this.thumbObserver = new IntersectionObserver((entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            const frame = entry.target;
+            if (frame.dataset.rendered === '1') continue;
+            frame.dataset.rendered = '1';
+
+            const idx = Number(frame.dataset.idx);
+            const slide = deck.slides[idx];
+            if (!slide) continue;
+
+            const frameW = frame.clientWidth || 180;
+            const scale = frameW / deck.width;
+
+            const scaler = document.createElement('div');
+            scaler.className = 'thumb-scaler';
+            scaler.style.transform = `scale(${scale})`;
+            SlideRenderer.renderSlide(deck, slide, scaler);
+
+            frame.innerHTML = '';
+            frame.appendChild(scaler);
+          }
+        }, { root: this.dom.sidebarContent, rootMargin: '250px' });
+
+        deck.slides.forEach((slide, idx) => {
+          const card = document.createElement('div');
+          card.className = `thumb-card ${idx === this.currentSlideIndex ? 'active' : ''}`;
+          card.dataset.idx = String(idx);
+
+          const num = document.createElement('div');
+          num.className = 'thumb-num';
+          num.textContent = String(idx + 1);
+
+          const frame = document.createElement('div');
+          frame.className = 'thumb-frame';
+          frame.style.aspectRatio = `${aspect}`;
+          frame.dataset.idx = String(idx);
+          frame.innerHTML = `<div class="thumb-placeholder">Slide ${idx + 1}</div>`;
+
+          card.appendChild(num);
+          card.appendChild(frame);
+          card.addEventListener('click', () => this.goToSlide(idx));
+          this.dom.sidebarContent.appendChild(card);
+
+          this.thumbObserver.observe(frame);
+        });
+      }
+
+      goToSlide(index) {
+        const deck = this.activeDeck;
+        if (!deck) return;
+        const clamped = Math.max(0, Math.min(deck.slides.length - 1, index));
+        this.currentSlideIndex = clamped;
+        this.saveSessionMeta();
+        const slide = deck.slides[clamped];
+
+        SlideRenderer.renderSlide(deck, slide, this.dom.slideSurface);
+
+        // Update Jump Input & Buttons
+        this.dom.slideJumpInput.value = String(clamped + 1);
+        document.getElementById('btn-prev').disabled = clamped === 0;
+        document.getElementById('btn-next').disabled = clamped === deck.slides.length - 1;
+
+        // Update Speaker Notes
+        if (slide.notes) {
+          this.dom.notesBody.textContent = slide.notes;
+          this.dom.notesBody.dir = containsArabic(slide.notes) ? 'rtl' : 'ltr';
+        } else {
+          this.dom.notesBody.textContent = 'No speaker notes for this slide.';
+          this.dom.notesBody.dir = 'ltr';
+        }
+
+        // Highlight active item in sidebar & scroll into view
+        const selector = this.sidebarMode === 'thumbnails' ? '.thumb-card' : '.outline-item';
+        this.dom.sidebarContent.querySelectorAll(selector).forEach(el => {
+          const isMatch = Number(el.dataset.idx) === clamped;
+          el.classList.toggle('active', isMatch);
+          if (isMatch) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        });
+
+        if (this.zoomMode === 'fit' || this.zoomMode === 'width') {
+          this.pan = { x: 0, y: 0 };
+        }
+        this.applyZoomLayout();
+      }
+
+      prevSlide() {
+        this.goToSlide(this.currentSlideIndex - 1);
+      }
+
+      nextSlide() {
+        this.goToSlide(this.currentSlideIndex + 1);
+      }
+
+      applyZoomLayout() {
+        const deck = this.activeDeck;
+        if (!deck) return;
+
+        const vpW = Math.max(200, this.dom.viewport.clientWidth - 48);
+        const vpH = Math.max(150, this.dom.viewport.clientHeight - 48);
+
+        if (this.zoomMode === 'fit') {
+          this.zoomScale = Math.min(vpW / deck.width, vpH / deck.height);
+        } else if (this.zoomMode === 'width') {
+          this.zoomScale = vpW / deck.width;
+        }
+
+        this.zoomScale = Math.max(0.15, Math.min(4, this.zoomScale));
+        this.dom.zoomReadout.textContent = `${Math.round(this.zoomScale * 100)}%`;
+
+        const canPan = this.zoomMode !== 'fit';
+        this.dom.viewport.classList.toggle('can-pan', canPan);
+        this.updateStageTransform();
+      }
+
+      adjustZoom(delta) {
+        if (!this.activeDeck) return;
+        this.zoomMode = 'manual';
+        this.zoomScale = Math.max(0.2, Math.min(4, this.zoomScale + delta));
+        this.applyZoomLayout();
+      }
+
+      updateStageTransform() {
+        this.dom.stageWrapper.style.transform = `translate(${this.pan.x}px, ${this.pan.y}px) scale(${this.zoomScale})`;
+      }
+
+      toggleStudyMode(enable) {
+        this.dom.app.classList.toggle('study-mode', enable);
+        document.getElementById('btn-study-mode').classList.toggle('active', enable);
+        this.applyZoomLayout();
+      }
+
+      async toggleFullscreen() {
+        try {
+          if (!document.fullscreenElement) {
+            await document.documentElement.requestFullscreen();
+          } else {
+            await document.exitFullscreen();
+          }
+        } catch (err) {
+          this.toast(`Fullscreen unavailable: ${err.message}`, 'error');
+        }
+      }
+
+      openSearchModal() {
+        if (!this.activeDeck) return;
+        this.dom.searchModal.classList.add('open');
+        this.dom.searchInput.value = '';
+        this.dom.searchInput.focus();
+        this.runSearch();
+      }
+
+      openShortcutsModal() {
+        this.dom.shortcutsModal.classList.add('open');
+      }
+
+      closeModals() {
+        this.dom.searchModal.classList.remove('open');
+        this.dom.shortcutsModal.classList.remove('open');
+      }
+
+      runSearch() {
+        const deck = this.activeDeck;
+        if (!deck) return;
+        const query = this.dom.searchInput.value.trim();
+        this.dom.searchResults.innerHTML = '';
+
+        if (!query) {
+          this.dom.searchResults.innerHTML = `<div style="padding:20px;text-align:center;font-size:12.5px;color:var(--text-muted);">Type keywords (English or العربية) across ${deck.slides.length} slides</div>`;
+          return;
+        }
+
+        const lowerQ = query.toLowerCase();
+        const hits = [];
+
+        deck.slides.forEach((slide, idx) => {
+          const pos = slide.searchText.toLowerCase().indexOf(lowerQ);
+          if (pos !== -1) {
+            const start = Math.max(0, pos - 45);
+            const end = Math.min(slide.searchText.length, pos + query.length + 65);
+            const rawSnippet = slide.searchText.slice(start, end);
+            hits.push({ idx, slide, rawSnippet });
+          }
+        });
+
+        if (hits.length === 0) {
+          this.dom.searchResults.innerHTML = `<div style="padding:20px;text-align:center;font-size:12.5px;color:var(--text-muted);">No matches found for "${DOMPurify.sanitize(query)}"</div>`;
+          return;
+        }
+
+        const escapedQ = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(${escapedQ})`, 'gi');
+
+        for (const hit of hits) {
+          const row = document.createElement('div');
+          row.className = 'search-hit';
+          const safeSnippet = DOMPurify.sanitize(hit.rawSnippet).replace(regex, '<mark>$1</mark>');
+          row.innerHTML = `
+            <div class="search-hit-meta">
+              <span>Slide ${hit.idx + 1}</span>
+              <span>•</span>
+              <span>${DOMPurify.sanitize(hit.slide.title)}</span>
+            </div>
+            <div class="search-hit-snippet" dir="${containsArabic(hit.rawSnippet) ? 'rtl' : 'ltr'}">…${safeSnippet}…</div>
+          `;
+          row.addEventListener('click', () => {
+            this.goToSlide(hit.idx);
+            this.closeModals();
+          });
+          this.dom.searchResults.appendChild(row);
+        }
+      }
+
+      async exportCurrentSlidePng() {
+        const deck = this.activeDeck;
+        if (!deck || typeof htmlToImage === 'undefined') return;
+        try {
+          this.toast('Rasterizing slide to high-DPI PNG…');
+          const dataUrl = await htmlToImage.toPng(this.dom.slideSurface, {
+            width: deck.width,
+            height: deck.height,
+            pixelRatio: 2,
+            backgroundColor: '#ffffff'
+          });
+          const a = document.createElement('a');
+          a.href = dataUrl;
+          a.download = `${deck.name.replace(/\.pptx$/i, '')}_slide_${this.currentSlideIndex + 1}.png`;
+          a.click();
+          this.toast('Slide exported as PNG.', 'success');
+        } catch (err) {
+          this.toast(`PNG export failed: ${err.message}`, 'error');
+        }
+      }
+
+      downloadOriginalPptx() {
+        const deck = this.activeDeck;
+        if (!deck) return;
+        const blob = new Blob([deck.originalBuffer], {
+          type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = deck.name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      }
+
+      handleKeydown(e) {
+        const tag = document.activeElement?.tagName;
+        const isTyping = tag === 'INPUT' || tag === 'TEXTAREA';
+
+        // Ctrl/Cmd + O -> Open file
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
+          e.preventDefault();
+          this.dom.fileInput.click();
+          return;
+        }
+
+        // Ctrl/Cmd + F -> Search slides
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+          if (this.activeDeck) {
+            e.preventDefault();
+            this.openSearchModal();
+          }
+          return;
+        }
+
+        if (e.key === 'Escape') {
+          if (this.dom.searchModal.classList.contains('open') || this.dom.shortcutsModal.classList.contains('open')) {
+            this.closeModals();
+            return;
+          }
+          if (this.dom.app.classList.contains('study-mode')) {
+            this.toggleStudyMode(false);
+            return;
+          }
+        }
+
+        if (isTyping) return;
+
+        if (e.key === '?') {
+          e.preventDefault();
+          this.openShortcutsModal();
+          return;
+        }
+
+        if (!this.activeDeck) return;
+
+        switch (e.key) {
+          case 'ArrowRight':
+          case ' ':
+          case 'PageDown':
+            e.preventDefault();
+            this.nextSlide();
+            break;
+          case 'ArrowLeft':
+          case 'Backspace':
+          case 'PageUp':
+            e.preventDefault();
+            this.prevSlide();
+            break;
+          case 'Home':
+            e.preventDefault();
+            this.goToSlide(0);
+            break;
+          case 'End':
+            e.preventDefault();
+            this.goToSlide(this.activeDeck.slides.length - 1);
+            break;
+          case 'f':
+          case 'F':
+            e.preventDefault();
+            this.toggleFullscreen();
+            break;
+          case '+':
+          case '=':
+            e.preventDefault();
+            this.adjustZoom(0.15);
+            break;
+          case '-':
+          case '_':
+            e.preventDefault();
+            this.adjustZoom(-0.15);
+            break;
+          case '0':
+            e.preventDefault();
+            this.zoomMode = 'fit';
+            this.pan = { x: 0, y: 0 };
+            this.applyZoomLayout();
+            break;
+        }
+      }
+    }
+
+    // Boot Application
+    window.addEventListener('DOMContentLoaded', () => {
+      window.deckStudio = new ViewerController();
+    });
+  </script>
+</body>
+</html>
